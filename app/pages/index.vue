@@ -1,4 +1,3 @@
-
 <template>
   <div class="app">
     <!-- Header -->
@@ -9,9 +8,9 @@
       </div>
 
       <div class="controls">
-        <button @click="zoomOut">−</button>
-        <span>{{ Math.round(zoom * 100) }}%</span>
-        <button @click="zoomIn">+</button>
+        <button @click="zoomOut" aria-label="Zoom out">−</button>
+        <span>{{ Math.round(zoomPercent) }}%</span>
+        <button @click="zoomIn" aria-label="Zoom in">+</button>
         <button @click="resetView">Home</button>
       </div>
     </header>
@@ -21,17 +20,26 @@
       ref="mapContainer"
       class="map-container"
       @wheel.prevent="handleWheel"
-      @mousedown="startPan"
-      @mousemove="pan"
-      @mouseup="stopPan"
-      @mouseleave="stopPan"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
     >
-      <canvas
-        ref="canvas"
+      <!-- Floor plan exported from the CAD drawing (scripts/cad-to-svg.py) -->
+      <img
+        ref="mapImage"
+        src="/maps/spn-level1.svg"
+        alt="SPN Level 1 floor plan"
+        class="floor-plan"
+        draggable="false"
         :style="{
-          transform: `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`
+          width: `${imageWidth * scale}px`,
+          height: `${imageHeight * scale}px`,
+          transform: `translate(${offsetX}px, ${offsetY}px)`
         }"
-      />
+        @load="onImageLoad"
+        @error="onImageError"
+      >
 
       <div v-if="loading" class="loading">
         Loading SPN map...
@@ -42,177 +50,159 @@
       </div>
     </main>
 
-    <!-- Legend -->
+    <!-- Hint -->
     <footer class="legend">
-      <div>
-        <span class="legend-box walkable"></span>
-        Walkable
-      </div>
-
-      <div>
-        <span class="legend-box wall"></span>
-        Wall / Outside
-      </div>
+      Pinch or scroll to zoom · Drag to move
     </footer>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
-const canvas = ref(null)
 const mapContainer = ref(null)
+const mapImage = ref(null)
 
 const loading = ref(true)
 const error = ref('')
 
-const grid = ref([])
+// Natural size of the SVG, read once it has loaded
+const imageWidth = ref(0)
+const imageHeight = ref(0)
 
-const zoom = ref(1)
+// scale = rendered size / natural size. fitScale is the scale that fits
+// the whole floor into the screen, and counts as "100%".
+const scale = ref(1)
+const fitScale = ref(1)
 const offsetX = ref(0)
 const offsetY = ref(0)
 
-const isPanning = ref(false)
-const lastMouseX = ref(0)
-const lastMouseY = ref(0)
+const MIN_ZOOM = 0.5 // relative to fitScale
+const MAX_ZOOM = 40
 
-// Smaller cell size because the real map is 478 × 226
-const CELL_SIZE = 4
+const zoomPercent = computed(() => (scale.value / fitScale.value) * 100)
 
-async function loadMap() {
-  try {
-    loading.value = true
-
-    const response = await fetch('/data/spn-level1-grid.json')
-
-    if (!response.ok) {
-      throw new Error('Could not load SPN map')
-    }
-
-    grid.value = await response.json()
-
-    await nextTick()
-
-    drawMap()
-    fitMap()
-
-  } catch (err) {
-    console.error(err)
-    error.value = 'Failed to load the SPN Level 1 map.'
-  } finally {
-    loading.value = false
-  }
+function onImageLoad() {
+  imageWidth.value = mapImage.value.naturalWidth
+  imageHeight.value = mapImage.value.naturalHeight
+  loading.value = false
+  fitMap()
 }
 
-function drawMap() {
-  if (!canvas.value || !grid.value.length) return
-
-  const ctx = canvas.value.getContext('2d')
-
-  const rows = grid.value.length
-  const cols = grid.value[0].length
-
-  canvas.value.width = cols * CELL_SIZE
-  canvas.value.height = rows * CELL_SIZE
-
-  ctx.clearRect(
-    0,
-    0,
-    canvas.value.width,
-    canvas.value.height
-  )
-
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-
-      const cell = grid.value[row][col]
-
-      if (cell === 1) {
-        // Traversable space
-        ctx.fillStyle = '#f5f5f5'
-      } else {
-        // Wall / outside
-        ctx.fillStyle = '#202020'
-      }
-
-      ctx.fillRect(
-        col * CELL_SIZE,
-        row * CELL_SIZE,
-        CELL_SIZE,
-        CELL_SIZE
-      )
-    }
-  }
+function onImageError() {
+  loading.value = false
+  error.value = 'Failed to load the SPN Level 1 map.'
 }
 
 function fitMap() {
-  if (!mapContainer.value || !canvas.value) return
+  if (!mapContainer.value || !imageWidth.value) return
 
-  const containerWidth = mapContainer.value.clientWidth
-  const containerHeight = mapContainer.value.clientHeight
-
-  const mapWidth = canvas.value.width
-  const mapHeight = canvas.value.height
-
-  const scaleX = containerWidth / mapWidth
-  const scaleY = containerHeight / mapHeight
+  const { clientWidth, clientHeight } = mapContainer.value
 
   // Leave a little padding around the map
-  zoom.value = Math.min(scaleX, scaleY) * 0.9
+  fitScale.value =
+    Math.min(clientWidth / imageWidth.value, clientHeight / imageHeight.value) * 0.95
+  scale.value = fitScale.value
 
-  offsetX.value =
-    (containerWidth - mapWidth * zoom.value) / 2
+  offsetX.value = (clientWidth - imageWidth.value * scale.value) / 2
+  offsetY.value = (clientHeight - imageHeight.value * scale.value) / 2
+}
 
-  offsetY.value =
-    (containerHeight - mapHeight * zoom.value) / 2
+// Zoom by `factor`, keeping the point (x, y) of the container fixed on screen
+function zoomAt(factor, x, y) {
+  const min = fitScale.value * MIN_ZOOM
+  const max = fitScale.value * MAX_ZOOM
+  const newScale = Math.min(max, Math.max(min, scale.value * factor))
+  const applied = newScale / scale.value
+
+  offsetX.value = x - (x - offsetX.value) * applied
+  offsetY.value = y - (y - offsetY.value) * applied
+  scale.value = newScale
+}
+
+function zoomAtCenter(factor) {
+  const { clientWidth, clientHeight } = mapContainer.value
+  zoomAt(factor, clientWidth / 2, clientHeight / 2)
 }
 
 function zoomIn() {
-  zoom.value *= 1.2
+  zoomAtCenter(1.25)
 }
 
 function zoomOut() {
-  zoom.value /= 1.2
+  zoomAtCenter(1 / 1.25)
 }
 
 function resetView() {
   fitMap()
 }
 
+// Converts a pointer/wheel event to coordinates inside the map container
+function toLocal(event) {
+  const rect = mapContainer.value.getBoundingClientRect()
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top }
+}
+
 function handleWheel(event) {
-  const direction = event.deltaY < 0 ? 1.1 : 0.9
-
-  zoom.value *= direction
+  const { x, y } = toLocal(event)
+  // exp() gives smooth zooming for both mouse wheels and trackpads
+  zoomAt(Math.exp(-event.deltaY * 0.0015), x, y)
 }
 
-function startPan(event) {
-  isPanning.value = true
+// ---- Drag to pan (1 finger / mouse) and pinch to zoom (2 fingers) ----
 
-  lastMouseX.value = event.clientX
-  lastMouseY.value = event.clientY
+const pointers = new Map() // pointerId -> { x, y }
+let lastPinch = null // { distance, midX, midY }
+
+function pinchInfo() {
+  const [a, b] = [...pointers.values()]
+  return {
+    distance: Math.hypot(b.x - a.x, b.y - a.y),
+    midX: (a.x + b.x) / 2,
+    midY: (a.y + b.y) / 2
+  }
 }
 
-function pan(event) {
-  if (!isPanning.value) return
-
-  const dx = event.clientX - lastMouseX.value
-  const dy = event.clientY - lastMouseY.value
-
-  offsetX.value += dx
-  offsetY.value += dy
-
-  lastMouseX.value = event.clientX
-  lastMouseY.value = event.clientY
+function onPointerDown(event) {
+  mapContainer.value.setPointerCapture(event.pointerId)
+  pointers.set(event.pointerId, toLocal(event))
+  if (pointers.size === 2) lastPinch = pinchInfo()
 }
 
-function stopPan() {
-  isPanning.value = false
+function onPointerMove(event) {
+  const previous = pointers.get(event.pointerId)
+  if (!previous) return
+
+  const current = toLocal(event)
+  pointers.set(event.pointerId, current)
+
+  if (pointers.size === 1) {
+    offsetX.value += current.x - previous.x
+    offsetY.value += current.y - previous.y
+  } else if (pointers.size === 2 && lastPinch) {
+    const pinch = pinchInfo()
+    // Move with the fingers, then zoom around their midpoint
+    offsetX.value += pinch.midX - lastPinch.midX
+    offsetY.value += pinch.midY - lastPinch.midY
+    zoomAt(pinch.distance / lastPinch.distance, pinch.midX, pinch.midY)
+    lastPinch = pinch
+  }
+}
+
+function onPointerUp(event) {
+  pointers.delete(event.pointerId)
+  lastPinch = pointers.size === 2 ? pinchInfo() : null
 }
 
 onMounted(() => {
-  loadMap()
+  // The server-rendered <img> may finish loading before Vue attaches @load
+  if (mapImage.value?.complete && mapImage.value.naturalWidth) onImageLoad()
 
   window.addEventListener('resize', fitMap)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', fitMap)
 })
 </script>
 
@@ -224,6 +214,7 @@ onMounted(() => {
 .app {
   width: 100vw;
   height: 100vh;
+  height: 100dvh; /* excludes the mobile browser's address bar */
   overflow: hidden;
   background: #111;
   color: white;
@@ -234,12 +225,14 @@ onMounted(() => {
 /* ---------------- HEADER ---------------- */
 
 .header {
-  height: 80px;
-  padding: 0 24px;
+  padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top));
 
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 
   background: #181818;
   border-bottom: 1px solid #333;
@@ -249,13 +242,13 @@ onMounted(() => {
 
 .header h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .header p {
   margin: 4px 0 0;
   color: #aaa;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 /* ---------------- CONTROLS ---------------- */
@@ -267,12 +260,16 @@ onMounted(() => {
 }
 
 .controls button {
+  min-width: 44px; /* comfortable tap target on phones */
+  height: 44px;
+
   background: #292929;
   border: 1px solid #444;
   color: white;
+  font-size: 16px;
 
-  padding: 8px 12px;
-  border-radius: 6px;
+  padding: 0 12px;
+  border-radius: 8px;
 
   cursor: pointer;
 }
@@ -296,26 +293,29 @@ onMounted(() => {
 
   overflow: hidden;
 
-  background: #0b0b0b;
+  background: #e9e9e9;
 
   cursor: grab;
+
+  touch-action: none; /* we handle pan/pinch ourselves, not the browser */
 }
 
 .map-container:active {
   cursor: grabbing;
 }
 
-canvas {
+.floor-plan {
   position: absolute;
 
   top: 0;
   left: 0;
 
-  transform-origin: 0 0;
-
-  image-rendering: pixelated;
+  max-width: none;
+  background: white;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 
   user-select: none;
+  pointer-events: none;
 }
 
 /* ---------------- LOADING ---------------- */
@@ -345,41 +345,14 @@ canvas {
 /* ---------------- LEGEND ---------------- */
 
 .legend {
-  height: 50px;
-
-  display: flex;
-  align-items: center;
-  gap: 24px;
-
-  padding: 0 24px;
+  padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
 
   background: #181818;
-
   border-top: 1px solid #333;
 
+  color: #aaa;
   font-size: 13px;
-}
-
-.legend div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.legend-box {
-  width: 16px;
-  height: 16px;
-
-  display: inline-block;
-
-  border: 1px solid #555;
-}
-
-.walkable {
-  background: #f5f5f5;
-}
-
-.wall {
-  background: #202020;
+  text-align: center;
 }
 </style>
