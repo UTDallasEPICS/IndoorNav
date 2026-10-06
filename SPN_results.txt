@@ -1,0 +1,49 @@
+(x, y) in file  -> (row, col)    snapped by  region size
+--------------------------------------------------------
+(284, 367)      (367, 284)                0       413338
+(295, 367)      (367, 295)                0       413338
+(218, 338)      (338, 218)                0       413338
+(298, 338)      (338, 298)                0       413338
+(355, 277)      (277, 355)                0       413338
+(355, 265)      (265, 355)                0       413338
+(255, 224)      (224, 255)                0       413338
+(367, 213)      (213, 367)                0       413338
+(366, 175)      (176, 366)                1       413338
+(398, 119)      (119, 398)                0       413338
+(446, 119)      (119, 446)                0       413338
+(494, 112)      (112, 494)                0       413338
+(504, 112)      (112, 504)                0       413338
+(511, 130)      (130, 511)                0       413338
+(531, 254)      (254, 531)                0       413338
+(539, 266)      (266, 539)                0       413338
+(565, 265)      (265, 565)                0       413338
+(564, 243)      (243, 564)                0       413338
+(555, 201)      (201, 555)                0       413338
+(607, 264)      (264, 607)                0       413338
+(604, 253)      (253, 604)                0       413338
+
+==============================================================================
+SPEED TEST: routes between the points in coordinates.txt
+==============================================================================
+Routes timed: 420 (ordered pairs with a route); 0 pairs skipped because the points are in disconnected regions
+Algorithm                   avg ms  vs fastest  suboptimal   errors
+-------------------------------------------------------------------
+BFS tree lookup*             0.218        1.0x           0        0
+Greedy best-first           17.890       82.2x         395        0
+A* (optimized)              38.392      176.5x           0        0
+Bidirectional BFS           41.072      188.8x           0        0
+BFS                         83.994      386.2x           0        0
+Line search (optimal)      255.332     1173.9x           0        0
+DFS                        265.063     1218.6x         417        0
+Line search                286.331     1316.4x         164        0
+* needs a BFS from each start point (21 builds, 10063.5 ms total, ~23.961 ms per route if counted); only pays off when many queries share a start.
+
+Always-correct, always-shortest algorithms (ranked by average time):
+  1. A* (optimized)            38.392 ms
+  2. Bidirectional BFS         41.072 ms
+  3. BFS                       83.994 ms
+  4. Line search (optimal)    255.332 ms
+Not eligible (found a longer-than-shortest path, or errors):
+     Greedy best-first         17.890 ms   (395 problem paths)
+     DFS                      265.063 ms   (417 problem paths)
+     Line search              286.331 ms   (164 problem paths)
