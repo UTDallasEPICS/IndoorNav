@@ -16,7 +16,7 @@ A* (original)               11.545       79.6x           0        0
 * needs a one-time 4.5 ms BFS from the start cell; only works when many queries share the same start.
 
 ==============================================================================
-SCENARIO 2: maze with loops (5% extra openings, several routes)
+SCENARIO 2: maze with loops (30% extra openings, several routes)
 ==============================================================================
 Destinations: 5521 reachable, 0 unreachable inside the 99x99 window, 3888 skipped (walls / start)
 Algorithm                   avg ms  vs fastest  suboptimal   errors

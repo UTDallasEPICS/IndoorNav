@@ -563,7 +563,7 @@ def make_scenarios():
     try:
         from generate_grid import generate_maze
         looped = generate_maze(size=len(grid), loop_chance=0.30, seed=7)
-        scenarios.append(("SCENARIO 2: maze with loops (5% extra openings, several routes)", looped))
+        scenarios.append(("SCENARIO 2: maze with loops (30% extra openings, several routes)", looped))
     except ImportError:
         print("generate_grid.py not found next to this file; skipping the maze-with-loops scenario.")
     return scenarios
