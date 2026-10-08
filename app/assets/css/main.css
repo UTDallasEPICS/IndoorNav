@@ -1,0 +1,97 @@
+/*
+ * Global theme — change the app's colours and fonts here.
+ * Every component uses these variables, so editing a value below updates
+ * the logo, buttons, location marker, etc. everywhere at once.
+ */
+:root {
+  /* Brand */
+  --color-primary: #bfe05b; /* logo, buttons, location marker, highlights */
+  --color-on-primary: #1c1c1e; /* text/icons placed on top of the primary colour */
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 35%, transparent); /* location halo */
+
+  /* Surfaces & text */
+  --color-background: #ffffff;
+  --color-surface: #ffffff; /* bottom sheet, floating buttons */
+  --color-text: #1c1c1e;
+  --color-text-muted: #8e8e93;
+  --color-border: #d1d1d6;
+  --color-error: #e5484d;
+  --shadow-floating: 0 2px 10px rgba(0, 0, 0, 0.12);
+
+  /* Fonts */
+  --font-brand: 'Iceberg', system-ui, sans-serif; /* app name on the landing screen */
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* Mobile-only layout: on a wider screen the app is shown as a phone-width column */
+  --app-max-width: 480px;
+  --color-desktop-backdrop: #e5e5ea; /* around the column on wider screens */
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0; /* browsers add 8px by default, which makes the page scroll */
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none; /* no pull-to-refresh / bounce on the map */
+  font-family: var(--font-body);
+  background: var(--color-background);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent; /* no grey flash on tap */
+  -webkit-text-size-adjust: 100%;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+/* Wider than a phone: grey backdrop around the phone-width app column */
+@media (min-width: 481px) {
+  body {
+    background: var(--color-desktop-backdrop);
+  }
+}
+
+/* ---------------- PAGE TRANSITION ----------------
+ * Used when moving between pages (set up in nuxt.config.ts).
+ * The old page fades out while gently growing, then the new page fades in.
+ */
+.page-enter-active,
+.page-leave-active {
+  transition:
+    opacity 0.45s ease,
+    transform 0.45s ease;
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: scale(1.06);
+}
+
+.page-enter-from {
+  opacity: 0;
+}
+
+/* People who turn off animations on their phone get a plain fade */
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active,
+  .page-leave-active {
+    transition: opacity 0.2s linear;
+  }
+
+  .page-leave-to {
+    transform: none;
+  }
+}
+
+button {
+  touch-action: manipulation; /* removes the 300ms tap delay */
+}
