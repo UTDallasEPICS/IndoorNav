@@ -1,3 +1,5 @@
+Grid: 544 rows x 848 columns
+
 (x, y) in file  -> (row, col)    snapped by  region size
 --------------------------------------------------------
 (284, 367)      (367, 284)                0       413338
@@ -26,24 +28,25 @@
 SPEED TEST: routes between the points in coordinates.txt
 ==============================================================================
 Routes timed: 420 (ordered pairs with a route); 0 pairs skipped because the points are in disconnected regions
-Algorithm                   avg ms  vs fastest  suboptimal   errors
--------------------------------------------------------------------
-BFS tree lookup*             0.218        1.0x           0        0
-Greedy best-first           17.890       82.2x         395        0
-A* (optimized)              38.392      176.5x           0        0
-Bidirectional BFS           41.072      188.8x           0        0
-BFS                         83.994      386.2x           0        0
-Line search (optimal)      255.332     1173.9x           0        0
-DFS                        265.063     1218.6x         417        0
-Line search                286.331     1316.4x         164        0
-* needs a BFS from each start point (21 builds, 10063.5 ms total, ~23.961 ms per route if counted); only pays off when many queries share a start.
+Average length of the TRUE shortest path: 335.5 steps
+Algorithm                   avg ms  vs fastest   avg len  over opt  suboptimal   errors
+---------------------------------------------------------------------------------------
+BFS tree lookup*             0.187        1.0x     335.5      0.0%           0        0
+Greedy best-first           13.541       72.3x     472.3     40.8%         395        0
+A* (optimized)              34.250      182.8x     335.5      0.0%           0        0
+Bidirectional BFS           36.668      195.7x     335.5      0.0%           0        0
+ACO (Ant System)           370.858     1979.1x     400.0     19.2%         385        0
+Bee colony (ABC)           392.959     2097.0x     417.6     24.5%         396        0
+ACO (Max-Min)              411.646     2196.8x     396.5     18.2%         387        0
+* needs a BFS from each start point (21 builds, 9209.2 ms total, 438.5 ms per build, ~21.927 ms per route if counted); only pays off when many queries share a start.
+Swarm algorithms share a one-time grid setup of 25.1 ms (not included above).
+avg len = average number of steps in the path found (valid paths only); over opt = how much longer than the true shortest path, on the same routes.
 
 Always-correct, always-shortest algorithms (ranked by average time):
-  1. A* (optimized)            38.392 ms
-  2. Bidirectional BFS         41.072 ms
-  3. BFS                       83.994 ms
-  4. Line search (optimal)    255.332 ms
+  1. A* (optimized)            34.250 ms   avg length 335.5
+  2. Bidirectional BFS         36.668 ms   avg length 335.5
 Not eligible (found a longer-than-shortest path, or errors):
-     Greedy best-first         17.890 ms   (395 problem paths)
-     DFS                      265.063 ms   (417 problem paths)
-     Line search              286.331 ms   (164 problem paths)
+     Greedy best-first         13.541 ms   avg length 472.3 (+40.8% vs shortest; 395 routes not shortest/errors)
+     ACO (Ant System)         370.858 ms   avg length 400.0 (+19.2% vs shortest; 385 routes not shortest/errors)
+     Bee colony (ABC)         392.959 ms   avg length 417.6 (+24.5% vs shortest; 396 routes not shortest/errors)
+     ACO (Max-Min)            411.646 ms   avg length 396.5 (+18.2% vs shortest; 387 routes not shortest/errors)
