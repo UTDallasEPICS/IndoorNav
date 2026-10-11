@@ -27,9 +27,19 @@
         @error="onImageError"
       >
 
-      <!-- "You are here" marker. Stays the same size on screen at any zoom. -->
+      <!-- Step 1: marker fixed in the middle of the visible map; the map moves under it -->
       <div
-        v-if="ready && currentLocation"
+        v-if="ready && step === 'pick'"
+        class="location-marker picking"
+        :class="{ shown: viewReady, lifted: isPanning }"
+        :style="{ top: `calc((100% - ${sheetHeight}px) / 2)`, left: '50%' }"
+      >
+        <AppLogo :size="28" />
+      </div>
+
+      <!-- Step 2: "You are here" marker pinned to the map. Same size on screen at any zoom. -->
+      <div
+        v-else-if="ready && currentLocation"
         class="location-marker"
         :class="{ shown: viewReady }"
         :style="{ transform: `translate(${toScreenX(currentLocation.x)}px, ${toScreenY(currentLocation.y)}px)` }"
@@ -62,7 +72,7 @@
       </div>
     </main>
 
-    <!-- Bottom sheet: destination search -->
+    <!-- Bottom sheet: step 1 sets your location, step 2 searches the destination -->
     <section ref="sheet" class="sheet">
       <!-- Map controls ride on top of the sheet, on the right -->
       <div class="map-controls">
@@ -80,39 +90,56 @@
         </button>
       </div>
 
-      <div class="sheet-header">
-        <h2>Enter Destination</h2>
-        <span class="building-tag">in</span>
-      </div>
+      <template v-if="step === 'pick'">
+        <div class="sheet-header">
+          <h2>Set Your Location</h2>
+        </div>
+        <p class="sheet-hint">Move the map so the marker is where you are.</p>
 
-      <form class="destination-form" @submit.prevent="findRoute">
-        <input
-          v-model="destination"
-          class="destination-input"
-          type="text"
-          list="room-list"
-          placeholder="Where to take you to?"
-          enterkeyhint="go"
-          autocomplete="off"
-          aria-label="Destination"
-        >
-        <!-- Suggestions while typing, from the rooms in the CAD drawing -->
-        <datalist id="room-list">
-          <option v-for="room in namedRooms" :key="room.label" :value="room.label" />
-        </datalist>
-
-        <p v-if="destinationError" class="destination-error">{{ destinationError }}</p>
-
-        <button class="primary-button" type="submit" :disabled="!destination.trim()">
-          Find Route
+        <button class="primary-button" type="button" :disabled="!ready" @click="confirmLocation">
+          Confirm Location
         </button>
-      </form>
+      </template>
+
+      <template v-else>
+        <div class="sheet-header">
+          <h2>Enter Destination</h2>
+          <span class="building-tag">in</span>
+        </div>
+        <p class="sheet-hint">
+          Starting from your pinned location.
+          <button class="link-button" type="button" @click="changeLocation">Change</button>
+        </p>
+
+        <form class="destination-form" @submit.prevent="findRoute">
+          <input
+            v-model="destination"
+            class="destination-input"
+            type="text"
+            list="room-list"
+            placeholder="Where to take you to?"
+            enterkeyhint="go"
+            autocomplete="off"
+            aria-label="Destination"
+          >
+          <!-- Suggestions while typing, from the rooms in the CAD drawing -->
+          <datalist id="room-list">
+            <option v-for="room in namedRooms" :key="room.label" :value="room.label" />
+          </datalist>
+
+          <p v-if="destinationError" class="destination-error">{{ destinationError }}</p>
+
+          <button class="primary-button" type="submit" :disabled="!destination.trim()">
+            Find Route
+          </button>
+        </form>
+      </template>
     </section>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 const mapContainer = ref(null)
 const mapImage = ref(null)
@@ -138,10 +165,16 @@ const START_VIEW_WIDTH = 0.12
 // with x/y as fractions (0–1) of the floor plan's width/height
 const rooms = ref([])
 
-// No positioning yet, so the user is assumed to be in the main lobby
-const currentLocation = computed(() =>
-  rooms.value.find(room => room.number === '1.1' && room.name === 'LOBBY')
+// Where the map opens: the main lobby (or the middle of the floor if it's missing)
+const startPoint = computed(() =>
+  rooms.value.find(room => room.number === '1.1' && room.name === 'LOBBY') ?? { x: 0.5, y: 0.5 }
 )
+
+// 'pick' = user is placing their location, 'destination' = searching where to go
+const step = ref('pick')
+const currentLocation = ref(null) // { x, y } the user confirmed, null until then
+const isPanning = ref(false) // finger/mouse is down on the map (lifts the marker)
+const sheetHeight = ref(0) // kept in sync with the sheet so the marker stays centred above it
 
 const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0)
 
@@ -209,17 +242,50 @@ function centerOn(fx, fy, newScale = scale.value) {
   offsetY.value = visibleHeight / 2 - fy * imageHeight.value * newScale
 }
 
+// The floor-plan point currently in the middle of the visible map (under the picking marker)
+function visibleCenter() {
+  const { clientWidth, clientHeight } = mapContainer.value
+  const visibleHeight = clientHeight - sheet.value.offsetHeight
+  return {
+    x: (clientWidth / 2 - offsetX.value) / (imageWidth.value * scale.value),
+    y: (visibleHeight / 2 - offsetY.value) / (imageHeight.value * scale.value)
+  }
+}
+
 function resetView() {
   if (!ready.value) return
-  const { x, y } = currentLocation.value ?? { x: 0.5, y: 0.5 }
+  const { x, y } = currentLocation.value ?? startPoint.value
   centerOn(x, y, startScale())
 }
 
-// Compass button: glide back to the user's location
+// Compass button: glide back to the user's location (or the lobby while picking)
 function goToMyLocation() {
   if (!ready.value) return
-  const { x, y } = currentLocation.value ?? { x: 0.5, y: 0.5 }
+  const { x, y } = currentLocation.value ?? startPoint.value
   flyTo(x, y, startScale())
+}
+
+// ---- Setting your location ----
+
+async function confirmLocation() {
+  stopAnimation()
+  const point = visibleCenter() // read before the sheet changes height
+  currentLocation.value = point
+  step.value = 'destination'
+
+  await nextTick() // wait for the taller destination sheet to render
+  flyTo(point.x, point.y) // glide so the marker sits in the middle of the new visible area
+}
+
+async function changeLocation() {
+  stopAnimation()
+  selectedRoom.value = null // the destination no longer applies
+  destinationError.value = ''
+  step.value = 'pick'
+
+  await nextTick() // wait for the shorter pick sheet to render
+  const { x, y } = currentLocation.value ?? startPoint.value
+  flyTo(x, y) // bring the saved point under the centred marker
 }
 
 // ---- Smooth movement ----
@@ -257,11 +323,7 @@ function flyTo(fx, fy, targetScale = scale.value, whenArrived = null) {
     return
   }
 
-  // The floor-plan point currently in the middle of the visible map
-  const { clientWidth, clientHeight } = mapContainer.value
-  const visibleHeight = clientHeight - sheet.value.offsetHeight
-  const fromX = (clientWidth / 2 - offsetX.value) / (imageWidth.value * scale.value)
-  const fromY = (visibleHeight / 2 - offsetY.value) / (imageHeight.value * scale.value)
+  const { x: fromX, y: fromY } = visibleCenter()
   const fromScale = scale.value
   const startTime = performance.now()
 
@@ -353,6 +415,7 @@ function onPointerDown(event) {
   const point = toLocal(event)
   pointers.set(event.pointerId, point)
 
+  isPanning.value = true
   tapStart = pointers.size === 1 ? { ...point, time: event.timeStamp } : null
   if (pointers.size === 2) lastPinch = pinchInfo()
 }
@@ -385,6 +448,7 @@ function onPointerMove(event) {
 function onPointerUp(event) {
   pointers.delete(event.pointerId)
   lastPinch = pointers.size === 2 ? pinchInfo() : null
+  isPanning.value = pointers.size > 0 // drop the marker once every finger is up
 
   if (tapStart && event.type === 'pointerup' && event.timeStamp - tapStart.time < 250) {
     const isDoubleTap =
@@ -445,17 +509,24 @@ function onResize() {
   if (ready.value) setupView()
 }
 
+// The sheet changes height between steps; the picking marker needs to know
+const sheetObserver = import.meta.client
+  ? new ResizeObserver(() => { sheetHeight.value = sheet.value?.offsetHeight ?? 0 })
+  : null
+
 onMounted(() => {
   // The server-rendered <img> may finish loading before Vue attaches @load
   if (mapImage.value?.complete && mapImage.value.naturalWidth) onImageLoad()
 
   loadRooms()
   window.addEventListener('resize', onResize)
+  sheetObserver.observe(sheet.value)
 })
 
 onBeforeUnmount(() => {
   stopAnimation()
   window.removeEventListener('resize', onResize)
+  sheetObserver.disconnect()
 })
 </script>
 
@@ -500,9 +571,7 @@ onBeforeUnmount(() => {
 /* The halo circle, with the arrow centred inside it */
 .location-marker {
   --marker-size: 128px;
-  /* The marker's map point is the room number ("1.1"); lift the circle so the arrow
-     sits just above the label while the circle still wraps around it */
-  --marker-lift: 44px;
+  --marker-lift: 0px; /* the arrow marks the exact spot the user picked */
 
   position: absolute;
   top: 0;
@@ -520,6 +589,15 @@ onBeforeUnmount(() => {
   background: var(--color-primary-soft);
   border: 1px solid var(--color-primary);
   pointer-events: none;
+}
+
+/* While picking, the arrow floats up as you drag and settles when you let go (like Uber) */
+.location-marker.picking > * {
+  transition: transform 0.2s ease-out;
+}
+
+.location-marker.picking.lifted > * {
+  transform: translateY(-10px);
 }
 
 .destination-pin {
@@ -707,6 +785,22 @@ onBeforeUnmount(() => {
   font-size: 20px;
   font-weight: 700;
   color: var(--color-primary);
+}
+
+.sheet-hint {
+  margin: 6px 0 16px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .destination-form {
