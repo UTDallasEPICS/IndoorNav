@@ -2,6 +2,9 @@
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
+  // Client-only SPA so `nuxt generate` emits a static bundle Capacitor can
+  // load from the device (no Node server inside the native app)
+  ssr: false,
   // Theme colours, fonts and base styles (edit colours there)
   css: ['~/assets/css/main.css'],
   app: {
