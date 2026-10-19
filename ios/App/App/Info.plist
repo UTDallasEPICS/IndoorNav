@@ -24,6 +24,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Indoor Navigation listens for Wi-Fi access point beacons to find where you are inside the building. Your location stays on this phone.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Indoor Navigation uses your location to show where you are on campus and guide you to your destination. Your location stays on this phone.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -12,7 +12,9 @@
     "cap:ios": "nuxt generate && cap sync ios && cap open ios",
     "cap:android": "nuxt generate && cap sync android && cap open android",
     "cap:run:ios": "nuxt generate && cap run ios",
-    "cap:run:android": "nuxt generate && cap run android"
+    "cap:run:android": "nuxt generate && cap run android",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@capacitor-community/bluetooth-le": "^8.3.0",
