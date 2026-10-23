@@ -2,17 +2,22 @@
 // fused fix stream, events, and provider status.
 //
 //   const location = createDeviceLocationService()
-//   const unsubscribe = location.subscribe((fix) => { ... })
-//   await location.start(venue)
+//   const unsubscribe = location.subscribePosition((position) => { ... }) // or subscribe() for raw ENU fixes
+//   await location.start(spnVenue)
 
 import { Emitter } from './emitter'
 import { FusionEngine, type FusionOptions } from './fusion/FusionEngine'
+import { toMapPosition } from './mapPosition'
 import { BleProvider, type BleProviderOptions } from './providers/ble/BleProvider'
 import { CapacitorBleScanner } from './providers/ble/capacitorScanner'
 import { CapacitorGpsSource } from './providers/gps/capacitorGpsSource'
 import { GpsProvider } from './providers/gps/GpsProvider'
 import type { LocationProvider } from './providers/LocationProvider'
-import type { LocationEvent, LocationFix, ProviderId, ProviderStatus, VenueConfig } from './types'
+import type { LocationEvent, LocationFix, MapPosition, ProviderId, ProviderStatus, VenueConfig } from './types'
+import { indexVenue } from './venue'
+
+export type { LocationEvent, LocationFix, MapPosition, ProviderStatus, VenueConfig } from './types'
+export { spnVenue } from './venues/spn'
 
 export interface LocationServiceOptions {
   providers: LocationProvider[]
@@ -24,10 +29,12 @@ export class LocationService {
   private fusionOptions: Partial<FusionOptions>
   private fusion: FusionEngine | null = null
   private fixes = new Emitter<LocationFix>()
+  private positions = new Emitter<MapPosition>()
   private events = new Emitter<LocationEvent>()
   private statuses = new Emitter<ProviderStatus>()
   private cleanup: Array<() => void> = []
   private latestFix: LocationFix | null = null
+  private latestPosition: MapPosition | null = null
   private latestStatus: Partial<Record<ProviderId, ProviderStatus>> = {}
 
   constructor(options: LocationServiceOptions) {
@@ -38,6 +45,11 @@ export class LocationService {
   /** Latest fused fix, or null before the first one */
   get currentFix(): LocationFix | null {
     return this.latestFix
+  }
+
+  /** Latest fix that lies on a mapped floor, as map fractions + floor + margin of error. Null before the first one. */
+  get currentPosition(): MapPosition | null {
+    return this.latestPosition
   }
 
   /** Latest status of each provider */
@@ -54,6 +66,11 @@ export class LocationService {
     this.fixes.off(listener)
   }
 
+  /** Listens for fused fixes on a mapped floor, converted to map positions. Returns a function that unsubscribes. */
+  subscribePosition(listener: (position: MapPosition) => void): () => void {
+    return this.positions.on(listener)
+  }
+
   onEvent(listener: (event: LocationEvent) => void): () => void {
     return this.events.on(listener)
   }
@@ -66,11 +83,17 @@ export class LocationService {
   async start(venue: VenueConfig) {
     await this.stop()
     const fusion = new FusionEngine(venue, this.fusionOptions)
+    const index = indexVenue(venue)
     this.fusion = fusion
     this.cleanup.push(
       fusion.onFix((fix) => {
         this.latestFix = fix
         this.fixes.emit(fix)
+        const position = toMapPosition(fix, index)
+        if (position) {
+          this.latestPosition = position
+          this.positions.emit(position)
+        }
       }),
       fusion.onEvent((event) => this.events.emit(event))
     )
@@ -94,16 +117,13 @@ export class LocationService {
     this.cleanup = []
     this.fusion = null
     this.latestFix = null
+    this.latestPosition = null
   }
 }
 
-/** The service as the app runs it on a phone: BLE beacons + GPS via Capacitor plugins. */
-export function createDeviceLocationService(options: { ble?: Partial<BleProviderOptions>, fusion?: Partial<FusionOptions> } = {}) {
-  return new LocationService({
-    providers: [
-      new BleProvider(new CapacitorBleScanner(), options.ble),
-      new GpsProvider(new CapacitorGpsSource())
-    ],
-    fusion: options.fusion
-  })
+/** The service as the app runs it on a phone: BLE beacons (+ GPS unless `gps: false`) via Capacitor plugins. */
+export function createDeviceLocationService(options: { ble?: Partial<BleProviderOptions>, fusion?: Partial<FusionOptions>, gps?: boolean } = {}) {
+  const providers: LocationProvider[] = [new BleProvider(new CapacitorBleScanner(), options.ble)]
+  if (options.gps ?? true) providers.push(new GpsProvider(new CapacitorGpsSource()))
+  return new LocationService({ providers, fusion: options.fusion })
 }

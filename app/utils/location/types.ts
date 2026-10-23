@@ -46,6 +46,19 @@ export interface LocationFix {
   isIndoor: boolean
 }
 
+/** A fix as the app uses it: where on which floor's map, and how sure. See `toMapPosition`. */
+export interface MapPosition {
+  /** Fractions (0–1) of the floor's map SVG width and height, from the top-left */
+  x: number
+  y: number
+  /** Ordinal floor level (`Floor.level`), e.g. 1 for SPN1 level 1 */
+  floor: number
+  /** Margin of error: roughly a 1-sigma horizontal radius, in meters */
+  accuracyM: number
+  /** Milliseconds since the Unix epoch */
+  timestamp: number
+}
+
 export type ProviderId = 'ble' | 'gps'
 
 export interface ProviderStatus {
@@ -83,6 +96,11 @@ export interface Floor {
   /** Ordinal level, e.g. 1 for the ground floor */
   level: number
   transform: FloorTransform
+  /**
+   * Size of this floor's map SVG in plan units. Needed to report positions as fractions (0–1) of the map,
+   * the app's coordinate convention (see CLAUDE.md). Floors without it get no MapPosition.
+   */
+  plan?: { width: number, height: number }
 }
 
 export interface Building {
