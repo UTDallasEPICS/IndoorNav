@@ -45,8 +45,8 @@ const footprint = [[0, 0], [1, 0], [1, PLAN_HEIGHT], [0, PLAN_HEIGHT]].map(([x, 
 })
 
 /**
- * TODO(Andrew): AP Eddystone IDs and positions (from OIT or a walk of the building). Until this has entries the
- * BLE provider ignores every advert, so no position is produced and the app falls back to manual location.
+ * Empty on purpose: beacon positions and path-loss fits live in the on-device database (imported from the bSLAM
+ * survey, see app/db/beacons.ts). useNavigation fills them in with `withStoredBeacons` before starting.
  */
 const beacons: BeaconRegistryEntry[] = []
 

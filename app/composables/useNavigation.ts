@@ -4,7 +4,8 @@
 
 import { Capacitor } from '@capacitor/core'
 import { readonly, ref } from 'vue'
-import { createDeviceLocationService, spnVenue, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
+import { listBeacons } from '~/db/beacons'
+import { createDeviceLocationService, spnVenue, withStoredBeacons, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
 import { routeBetween } from '~/utils/route-between'
 
 export type { MapPosition }
@@ -37,16 +38,35 @@ export function useNavigation() {
     }
 
     // GPS is off: it was removed from the map page and doesn't help inside SPN1
-    service = createDeviceLocationService({ gps: false })
-    service.onStatus(status => {
+    const created = createDeviceLocationService({ gps: false })
+    service = created
+    created.onStatus(status => {
       locationStatus.value = status.state
       locationMessage.value = status.message ?? ''
     })
-    service.subscribePosition(p => { position.value = p })
+    created.subscribePosition(p => { position.value = p })
     staleTimer = setInterval(() => {
       if (position.value && Date.now() - position.value.timestamp > STALE_AFTER_MS) position.value = null
     }, 1000)
-    await service.start(spnVenue)
+
+    // Beacon positions and path-loss fits come from the on-device database (the bSLAM survey import)
+    let venue
+    try {
+      venue = withStoredBeacons(spnVenue, await listBeacons(await useDb()))
+    } catch (err) {
+      if (service === created) {
+        locationStatus.value = 'error'
+        locationMessage.value = `Couldn't load beacon positions: ${err instanceof Error ? err.message : String(err)}`
+      }
+      return
+    }
+    if (service !== created) return // stopped while the database was loading
+    if (!venue.beacons.length) {
+      locationStatus.value = 'unavailable'
+      locationMessage.value = 'No surveyed beacons for this building yet.'
+      return
+    }
+    await created.start(venue)
   }
 
   /** Stops positioning once the last component that started it stops it. */

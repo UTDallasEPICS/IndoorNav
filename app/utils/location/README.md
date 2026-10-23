@@ -44,9 +44,28 @@ Everything else is internal.
   `{ x, y, floor, accuracyM, timestamp }`. Floors without `plan` produce no `MapPosition`.
 - **SPN1** (`venues/spn.ts`): plan units are map widths (the plan is 1 × 0.457867). The level 1 transform
   is fitted (`geo/georef.ts`) from three satellite-surveyed corners: 0.76 m RMS, map ≈ 126 m wide,
-  map "up" ≈ east. Its `beacons` list is **empty** until the AP survey is done, so no fixes come out yet.
+  map "up" ≈ east. Its `beacons` list is empty in code: see **Beacon data** below.
 - Every fix has `enu` + `floorId` (null outdoors) + `wgs84`. `accuracyM` is roughly a 1-sigma horizontal
   radius. Headings are degrees clockwise from **true** north.
+
+## Beacon data
+
+Beacon positions and path-loss fits live in the on-device SQLite database (`beacons` table, `app/db/schema.ts`),
+stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSLAM survey exports bundled in
+`public/data/surveys/` and imported on first launch by `app/db/seed.ts` → `importBeaconSurvey` (`app/db/beacons.ts`).
+
+- `useNavigation` reads them with `listBeacons(db)` and passes them through `withStoredBeacons(spnVenue, rows)`
+  (`beaconRegistry.ts`), which converts lat/lon to ENU and keeps only trusted beacons: `manual`, `good`, `fair`.
+  `ambiguous`, `poor` and `insufficient` rows are stored but not used (`BeaconRegistryOptions.statuses`).
+- Each beacon's `txPower` / `pathLossExponent` are the survey's fitted values. Its mounting height is
+  `floorZ + phoneHeightM + height_offset_m`, the beacon-to-phone height the survey's fit assumed.
+- **Adding a survey:** copy the export's `*_beacons_*.csv` and `*_floor_*.json` into `public/data/surveys/` as
+  `<building>-level<N>-beacons-<stamp>.csv` / `-floor-<stamp>.json`, and append it to `surveys` in `seed.ts`
+  (oldest first). Devices import it on next launch. A later survey overwrites a beacon's data, but a survey that
+  couldn't place a beacon doesn't erase an earlier position.
+- **Check the export's georeference** before adding it. The 2026-10-21 level 1 export's was wrong (image-right
+  set to east; it's south), so `seed.ts` overrides it with `geo`, fitted from room labels matched between the
+  survey's floorplan image and the map SVG. `beacons.test.ts` fails if surveyed beacons fall off the map.
 
 ## Data flow
 
@@ -73,6 +92,7 @@ CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') 
 | Folder | Contents | Capacitor imports? |
 | --- | --- | --- |
 | `types.ts`, `emitter.ts`, `venue.ts` | Shared types, a tiny event emitter, venue lookup tables | no |
+| `beaconRegistry.ts` | Stored (WGS84) beacons → `BeaconRegistryEntry` (ENU) | no |
 | `geo/` | WGS84/ECEF/ENU, floor plan ↔ ENU, point-in-polygon | no |
 | `providers/ble/` | Scanner interface + mock, Eddystone parsing, RSSI filter, path loss, estimators, floor vote, `BleProvider` | only `capacitorScanner.ts` |
 | `providers/gps/` | GPS source interface + mock, `GpsProvider` | only `capacitorGpsSource.ts` |
@@ -84,8 +104,8 @@ CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') 
 
 - `BleProvider` options: `estimator`, `updateIntervalMs` (1 s), `staleAfterMs` (4 s), `floorVoteTopN`,
   `phoneHeightM`, and the RSSI filter (`medianWindow`, `processNoise`, `measurementNoise`).
-- Per beacon: `txPower` (RSSI at 1 m) and `pathLossExponent`. Calibrate these in the building: stand 1 m
-  from an AP for `txPower`, then fit the exponent from readings at known distances.
+- Per beacon: `txPower` (RSSI at 1 m) and `pathLossExponent` come from the survey fit (see **Beacon data**).
+  Re-survey to recalibrate; beacons without a fit use `DEFAULT_BEACON_REGISTRY_OPTIONS`.
 - `FusionEngine` options: Kalman `accelerationNoise`, indoor/outdoor `switchAfterMs`, `gpsGoodAccuracyM`.
 
 ## Adding a provider (e.g. the Mist SDK, or PDR)

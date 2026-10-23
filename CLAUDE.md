@@ -61,8 +61,10 @@ Accelerometer (step detection) + compass (heading) ──► PDR (dead reckoning
                                     simplify path → straight segments + turns ──► map UI (blue dot, route, directions)
 ```
 
-- **Location (Andrew):** BLE is the absolute fix; PDR fills in between scans. Beacon positions live in a JSON keyed
-  by Eddystone namespace + instance ID, in the shared fractional coordinates. Target: < 4 m error, updates within 2 s (R01).
+- **Location (Andrew):** BLE is the absolute fix; PDR fills in between scans. Beacon positions and path-loss fits live
+  in the on-device DB (`beacons` table), keyed by Eddystone namespace + instance ID, in **WGS84 lat/lon** (the one
+  exception to the fractional-coordinate rule). They're imported from bSLAM surveys in `public/data/surveys/`; see
+  `app/utils/location/README.md`. Target: < 4 m error, updates within 2 s (R01).
 - **Heading / smoothing (Samuel, Andrew):** accelerometer + magnetometer; no gyroscope dependency. Expect magnetic
   interference indoors — treat heading as a soft signal, not ground truth.
 - **Routing (Ash):** A\* on the grid with an admissible heuristic (Euclidean/octile). Must stay < 2 s on a phone and
@@ -143,6 +145,9 @@ Decision drivers to respect:
 
 ### Location detection — Andrew (C02, R01)
 - [ ] Map each AP's Eddystone instance ID to a floor plan coordinate (from OIT, or by walking the building). *Due Oct 9*
+  - 2026-10-23: level 1 bSLAM survey (2026-10-21) imported into the on-device DB (`app/db/beacons.ts`, WGS84):
+    657 Eddystone-UID IDs, 197 placed good/fair and used for positioning. Survey georef corrected in `app/db/seed.ts`.
+    Not yet verified on a device; level 2 not surveyed.
 - [ ] Get written non-objection from OIT for passive BLE reception. *Due Oct 16*
 - [ ] Confirm a Capacitor BLE plugin reads advertisements on current iOS **and** Android devices.
 - [ ] BLE trilateration prototype that outputs coordinates.
@@ -172,8 +177,8 @@ Decision drivers to respect:
 
 ### System integration — Samuel (R04)
 - [ ] Map, location, and pathfinding modules wired together behind one interface for the UI.
-  - 2026-10-23: `app/composables/useNavigation.ts` wired into `map.vue` (live `MapPosition` + `routeTo`). Not yet
-    verified on a device: needs SPN1 beacon entries in `app/utils/location/venues/spn.ts`.
+  - 2026-10-23: `app/composables/useNavigation.ts` wired into `map.vue` (live `MapPosition` + `routeTo`), with
+    beacons loaded from the on-device DB. Not yet verified on a device.
 - [ ] Floor change detection switches to the matching floor plan (barometer where available). *Milestone: Nov 13*
 - [ ] Test plan running alongside development: multi-path routes, elevator/stairs, location updates while walking.
 

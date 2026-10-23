@@ -18,6 +18,7 @@ import { indexVenue } from './venue'
 
 export type { LocationEvent, LocationFix, MapPosition, ProviderStatus, VenueConfig } from './types'
 export { spnVenue } from './venues/spn'
+export { withStoredBeacons, type StoredBeacon } from './beaconRegistry'
 
 export interface LocationServiceOptions {
   providers: LocationProvider[]
