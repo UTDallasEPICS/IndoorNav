@@ -97,9 +97,9 @@ CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') 
 
 ## Running the simulator
 
-- **Tests (Node):** `npm test` runs every `*.test.ts` under `app/`, including an end-to-end walk
-  (outside → Level 1 → stairs → Level 2) for both estimators. `npm run test:watch` re-runs on save.
-- **Browser:** `npm run dev`, then open <http://localhost:3000/dev/location-sim>. It plots the truth,
+- **Tests (Node):** `pnpm test` runs every `*.test.ts` under `app/`, including an end-to-end walk
+  (outside → Level 1 → stairs → Level 2) for both estimators. `ppnpm test:watch` re-runs on save.
+- **Browser:** `pnpm dev`, then open <http://localhost:3000/dev/location-sim>. It plots the truth,
   raw BLE fixes and fused fixes, and shows the mean / p50 / p90 error table. You can change the estimator,
   RSSI noise and seed.
 - **In code:**
