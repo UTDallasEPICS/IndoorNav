@@ -13,6 +13,10 @@
     "cap:android": "nuxt generate && cap sync android && cap open android",
     "cap:run:ios": "nuxt generate && cap run ios",
     "cap:run:android": "nuxt generate && cap run android",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -22,12 +26,15 @@
     "@capacitor/core": "^8.5.3",
     "@capacitor/geolocation": "^8.2.4",
     "@capacitor/ios": "^8.5.3",
+    "drizzle-orm": "^0.45.4",
     "nuxt": "^4.5.2",
     "vue": "^3.5.43",
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^7.0.2"
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }
