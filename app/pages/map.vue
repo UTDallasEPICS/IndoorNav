@@ -223,7 +223,7 @@
           <p v-if="destinationError" class="destination-error">{{ destinationError }}</p>
 
           <button class="primary-button" type="submit" :disabled="routeLoading || !destination.trim()">
-            {{ routeLoading ? 'Finding route…' : 'Find Route' }} <!-- button text changes while waiting for the server -->
+            {{ routeLoading ? 'Finding route…' : 'Find Route' }} <!-- button text changes while the route is being found -->
           </button>
         </form>
       </template>
@@ -234,7 +234,7 @@
 <script setup> // "setup": everything declared here can be used in the template above
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { makeGpsToMap, isOnMap } from '#shared/geo-map' // shared/geo-map.js: GPS lat/lng -> map position { x, y }
-import { cellToMap } from '#shared/grid-map' // shared/grid-map.js: route grid cell [row, col] -> map position { x, y } // see the notes where each is used
+import { routeBetween, loadRouteGrid } from '~/utils/route-between' // A* on the device: two map positions -> route points
 
 const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
 const mapImage = ref(null) // the <img> floor plan
@@ -693,7 +693,7 @@ const destination = ref('') // the search box text (v-model in the template)
 const destinationError = ref('')
 const selectedRoom = ref(null) // the room the pin is shown on (null = no pin)
 const route = ref(null) // { points: [{ x, y }, ...] } in map fractions, start to destination; null = no line
-const routeLoading = ref(false) // waiting for the server (disables the button)
+const routeLoading = ref(false) // true while the route is being found (disables the button)
 const ROUTE_PADDING = 40 // px kept around the route when zooming to fit it
 
 const routePoints = computed(() => // "x1,y1 x2,y2 ..." for the <polyline>
@@ -707,7 +707,7 @@ const namedRooms = computed(() =>
     .map(room => ({ ...room, label: `${room.name} (${room.number})` }))
 )
 
-async function findRoute() { // "Find Route" button: find the room, ask the server for a route, glide to it, then drop the pin
+async function findRoute() { // "Find Route" button: find the room, work out the route, glide to it, then drop the pin
   const query = destination.value.trim().toLowerCase()
   const room = namedRooms.value.find(r =>
     [r.label, r.number, r.name].some(text => text.toLowerCase() === query)
@@ -734,15 +734,12 @@ async function findRoute() { // "Find Route" button: find the room, ask the serv
 
   routeLoading.value = true
   try {
-    // Same server route as the /route test page: runs scripts/navigation.py (A*) and sends back [row, col] cells
-    const { path } = await $fetch('/api/route', {
-      method: 'POST',
-      body: { start: { x: start.x, y: start.y }, destination: { x: room.x, y: room.y } }
-    })
+    const points = await routeBetween(start, room) // A* runs right here on the phone
     if (step.value !== 'destination') return // "Change" was tapped while waiting
-    route.value = { points: path.map(cellToMap) } // each cell -> { x, y } on the map; setting this draws the line
+    route.value = { points } // setting this draws the line
   } catch (err) {
-    destinationError.value = err.data?.message ?? 'Something went wrong finding the route.'
+    console.error(err)
+    destinationError.value = err.message || 'Something went wrong finding the route.'
   } finally { // runs whether it worked or failed
     routeLoading.value = false
   }
@@ -788,6 +785,7 @@ onMounted(() => { // runs once the page is on screen in the browser
   if (mapImage.value?.complete && mapImage.value.naturalWidth) onImageLoad()
 
   loadRooms()
+  loadRouteGrid().catch(() => {}) // start loading the grid now so Find Route is quick; errors show when it's pressed
   window.addEventListener('resize', onResize)
   sheetObserver.observe(sheet.value)
 })
