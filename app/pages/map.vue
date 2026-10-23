@@ -1,4 +1,6 @@
-<template>
+<template> <!-- the page's HTML. <script setup> below holds the logic, <style scoped> the CSS -->
+  <!-- MAP PAGE: step 1 = drag the map under the 📍 and confirm your location,
+       step 2 = search a room; the map glides there and drops a pin -->
   <div class="map-page">
     <!-- Map fills the whole screen; the controls and bottom sheet float on top -->
     <main
@@ -9,12 +11,12 @@
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
-    >
+    > <!-- ref="..." lets the script use this element; @event="fn" calls fn when it happens -->
       <!-- Floor plan exported from the CAD drawing (scripts/cad-to-svg.py) -->
       <img
         ref="mapImage"
-        src="/maps/spn-level1.svg"
-        alt="SPN Level 1 floor plan"
+        :src="floorMap"
+        :alt="`SPN Level ${floor} floor plan`"
         class="floor-plan"
         :class="{ shown: viewReady }"
         draggable="false"
@@ -25,37 +27,89 @@
         }"
         @load="onImageLoad"
         @error="onImageError"
+      > <!-- ":" before an attribute = its value comes from the script and updates by itself -->
+
+      <!-- Destination room filled in. Same size and position as the floor plan, and its
+           viewBox is 0–1 so the outline's fractions can be used as-is. -->
+      <Transition name="room-fill"> <!-- fades the fill in/out using the .room-fill-* classes in the CSS -->
+        <svg
+          v-if="ready && selectedRoom?.outline && selectedRoom.floor === mapFloor"
+          :key="selectedRoom.label"
+          class="room-highlight"
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+          :style="{
+            width: `${imageWidth * scale}px`,
+            height: `${imageHeight * scale}px`,
+            transform: `translate(${offsetX}px, ${offsetY}px)`
+          }"
+        >
+          <polygon :points="selectedRoom.outline.map(point => point.join(',')).join(' ')" /> <!-- [[x, y], ...] -> "x,y x,y ..." -->
+        </svg>
+      </Transition>
+
+      <!-- Route line from your location to the destination. Same size and position as the floor plan. -->
+      <svg
+        v-if="ready && route && mapFloor === 1"
+        class="route-line"
+        viewBox="0 0 1 1"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        :style="{
+          width: `${imageWidth * scale}px`,
+          height: `${imageHeight * scale}px`,
+          transform: `translate(${offsetX}px, ${offsetY}px)`
+        }"
       >
+        <polyline class="line" :points="routePoints" /> <!-- lime line through every node, in order -->
+      </svg>
+
+      <!-- Accuracy circle: you're probably somewhere inside it. Moves and zooms with the map. -->
+      <div
+        v-if="ready && locationFix?.floor === mapFloor"
+        class="accuracy-circle"
+        :style="{
+          width: `${accuracyRadius * 2}px`,
+          height: `${accuracyRadius * 2}px`,
+          transform: `translate(${toScreenX(locationFix.x)}px, ${toScreenY(locationFix.y)}px) translate(-50%, -50%)`
+        }"
+      /> <!-- the second translate centres the circle on the point -->
 
       <!-- Step 1: marker fixed in the middle of the visible map; the map moves under it -->
       <div
         v-if="ready && step === 'pick'"
-        class="location-marker picking"
+        class="map-pin start-pin"
         :class="{ shown: viewReady, lifted: isPanning }"
         :style="{ top: `calc((100% - ${sheetHeight}px) / 2)`, left: '50%' }"
-      >
-        <AppLogo :size="28" />
+      > <!-- v-if: this element only exists while the condition is true -->
+        <!-- Push-pin like 📍: a ball on a needle; the needle's point is the picked spot -->
+        <svg viewBox="0 0 24 36" aria-hidden="true">
+          <line class="pin-needle" x1="12" y1="16" x2="12" y2="35" />
+          <circle class="pin-head" cx="12" cy="10" r="9" />
+          <circle class="pin-shine" cx="8.5" cy="6.5" r="2.5" />
+        </svg>
       </div>
 
       <!-- Step 2: "You are here" marker pinned to the map. Same size on screen at any zoom. -->
       <div
-        v-else-if="ready && currentLocation"
+        v-else-if="ready && currentLocation?.floor === mapFloor"
         class="location-marker"
         :class="{ shown: viewReady }"
         :style="{ transform: `translate(${toScreenX(currentLocation.x)}px, ${toScreenY(currentLocation.y)}px)` }"
-      >
-        <AppLogo :size="28" />
+      > <!-- v-else-if: shown when the v-if above is false; moves with the map via toScreenX/Y -->
+        <AppLogo :size="28" /> <!-- components/AppLogo.vue (Nuxt imports components automatically) -->
       </div>
 
       <!-- Destination pin: the tip of the pin sits on the searched room -->
       <!-- out-in: the old pin shrinks away first, then the new one bursts in -->
       <Transition name="pin" mode="out-in" :duration="{ enter: 550, leave: 200 }">
         <div
-          v-if="ready && selectedRoom"
+          v-if="ready && selectedRoom?.floor === mapFloor"
           :key="selectedRoom.label"
-          class="destination-pin"
+          class="map-pin"
           :style="{ transform: `translate(${toScreenX(selectedRoom.x)}px, ${toScreenY(selectedRoom.y)}px)` }"
-        >
+        > <!-- a new :key = a new element to Vue, so each room gets its own enter animation -->
           <svg viewBox="0 0 24 32" aria-hidden="true">
             <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20C24 5.4 18.6 0 12 0z" />
             <circle cx="12" cy="12" r="4.5" />
@@ -63,20 +117,36 @@
         </div>
       </Transition>
 
-      <div v-if="!ready && !error" class="status">
+      <div v-if="!ready && !error" class="status"> <!-- until the map and rooms have loaded -->
         Loading map...
       </div>
 
       <div v-if="error" class="status error">
-        {{ error }}
+        {{ error }} <!-- {{ }} prints a value from the script -->
       </div>
     </main>
+
+    <!-- Floor switcher, top right. Outside <main> so taps don't start a map drag. -->
+    <div class="floor-toggle" role="group" aria-label="Floor">
+      <button
+        v-for="option in FLOORS"
+        :key="option.level"
+        type="button"
+        :class="{ active: floor === option.level }"
+        :aria-pressed="floor === option.level"
+        :aria-label="`Level ${option.level}`"
+        :disabled="!ready"
+        @click="switchFloor(option.level)"
+      > <!-- v-for: one button per entry in FLOORS; :key tells Vue which button is which -->
+        {{ option.level }}
+      </button>
+    </div>
 
     <!-- Bottom sheet: step 1 sets your location, step 2 searches the destination -->
     <section ref="sheet" class="sheet">
       <!-- Map controls ride on top of the sheet, on the right -->
       <div class="map-controls">
-        <button class="control" aria-label="Zoom in" @click="zoomIn">
+        <button class="control" aria-label="Zoom in" @click="zoomIn"> <!-- @click runs zoomIn() from the script -->
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
         <button class="control" aria-label="Zoom out" @click="zoomOut">
@@ -90,7 +160,7 @@
         </button>
       </div>
 
-      <template v-if="step === 'pick'">
+      <template v-if="step === 'pick'"> <!-- <template> groups elements without adding an extra <div> -->
         <div class="sheet-header">
           <h2>Set Your Location</h2>
         </div>
@@ -101,7 +171,7 @@
         </button>
       </template>
 
-      <template v-else>
+      <template v-else> <!-- step 2: destination search -->
         <div class="sheet-header">
           <h2>Enter Destination</h2>
           <span class="building-tag">in</span>
@@ -111,7 +181,7 @@
           <button class="link-button" type="button" @click="changeLocation">Change</button>
         </p>
 
-        <form class="destination-form" @submit.prevent="findRoute">
+        <form class="destination-form" @submit.prevent="findRoute"> <!-- .prevent stops the browser reloading the page on submit -->
           <input
             v-model="destination"
             class="destination-input"
@@ -121,7 +191,7 @@
             enterkeyhint="go"
             autocomplete="off"
             aria-label="Destination"
-          >
+          > <!-- v-model: the input and `destination` in the script stay in sync both ways -->
           <!-- Suggestions while typing, from the rooms in the CAD drawing -->
           <datalist id="room-list">
             <option v-for="room in namedRooms" :key="room.label" :value="room.label" />
@@ -129,8 +199,8 @@
 
           <p v-if="destinationError" class="destination-error">{{ destinationError }}</p>
 
-          <button class="primary-button" type="submit" :disabled="!destination.trim()">
-            Find Route
+          <button class="primary-button" type="submit" :disabled="routeLoading || !destination.trim()">
+            {{ routeLoading ? 'Finding route…' : 'Find Route' }} <!-- button text changes while the route is being found -->
           </button>
         </form>
       </template>
@@ -138,14 +208,15 @@
   </div>
 </template>
 
-<script setup>
+<script setup> // "setup": everything declared here can be used in the template above
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { routeBetween, loadRouteGrid } from '~/utils/route-between' // A* on the device: two map positions -> route points
 
-const mapContainer = ref(null)
-const mapImage = ref(null)
-const sheet = ref(null)
+const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
+const mapImage = ref(null) // the <img> floor plan
+const sheet = ref(null) // the bottom sheet <section>
 
-const error = ref('')
+const error = ref('') // shown on screen whenever it isn't empty
 
 // Natural size of the SVG, read once it has loaded
 const imageWidth = ref(0)
@@ -155,28 +226,46 @@ const imageHeight = ref(0)
 const scale = ref(1)
 const minScale = ref(1)
 const maxScale = ref(1)
-const offsetX = ref(0)
+const offsetX = ref(0) // where the map's top-left corner sits on screen, in px
 const offsetY = ref(0)
 
 // Starting zoom: how much of the floor's width is visible (0.12 = 12%)
 const START_VIEW_WIDTH = 0.12
 
-// Rooms from public/maps/spn-level1-rooms.json: { number, name, x, y },
-// with x/y as fractions (0–1) of the floor plan's width/height
+// Each floor's map and room list (made by scripts/cad-to-svg.py)
+const FLOORS = [
+  { level: 1, map: '/maps/spn-level1.svg', rooms: '/maps/spn-level1-rooms.json' },
+  { level: 2, map: '/maps/spn-level2.svg', rooms: '/maps/spn-level2-rooms.json' }
+]
+
+const floor = ref(1) // the floor the user picked (level 1 by default)
+const mapFloor = ref(null) // the floor whose map has finished loading and is on screen
+const floorMap = computed(() => FLOORS.find(option => option.level === floor.value).map) // computed(): a value worked out from other refs, updated automatically when they change
+
+// Rooms of every floor: { number, name, x, y, outline?, floor }, with x/y as
+// fractions (0–1) of that floor plan's width/height
 const rooms = ref([])
 
-// Where the map opens: the main lobby (or the middle of the floor if it's missing)
+// Where the map opens: the main lobby (or the middle of level 1 if it's missing)
 const startPoint = computed(() =>
-  rooms.value.find(room => room.number === '1.1' && room.name === 'LOBBY') ?? { x: 0.5, y: 0.5 }
+  rooms.value.find(room => room.number === '1.1' && room.name === 'LOBBY') ?? { x: 0.5, y: 0.5, floor: 1 }
 )
 
 // 'pick' = user is placing their location, 'destination' = searching where to go
 const step = ref('pick')
-const currentLocation = ref(null) // { x, y } the user confirmed, null until then
+const currentLocation = ref(null) // { x, y, floor } the user confirmed, null until then
 const isPanning = ref(false) // finger/mouse is down on the map (lifts the marker)
 const sheetHeight = ref(0) // kept in sync with the sheet so the marker stays centred above it
+const locationFix = ref(null) // { x, y, floor, accuracy } from the location subsystem, accuracy in metres; null = no circle
 
-const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0)
+// How much of the plan's width one metre covers (from the building's surveyed corners)
+const WIDTH_PER_METER = 0.00782
+
+const accuracyRadius = computed(() => // circle radius in screen px (metres -> plan widths -> px)
+  locationFix.value ? locationFix.value.accuracy * WIDTH_PER_METER * imageWidth.value * scale.value : 0
+)
+
+const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0) // map image and rooms both loaded
 
 // True once the map has been positioned; until then it's hidden so the
 // unpositioned (full-size) image never flashes on screen
@@ -184,19 +273,26 @@ const viewReady = ref(false)
 
 // ---- Loading ----
 
-function onImageLoad() {
+function onImageLoad() { // the <img> finished loading (first load, or after a floor switch)
   imageWidth.value = mapImage.value.naturalWidth
   imageHeight.value = mapImage.value.naturalHeight
-  if (ready.value) setupView()
+  mapFloor.value = floor.value
+
+  if (floorSwitch) {
+    finishFloorSwitch()
+  } else if (ready.value) {
+    setupView()
+  }
 }
 
 function onImageError() {
-  error.value = 'Failed to load the SPN Level 1 map.'
+  error.value = `Failed to load the SPN Level ${floor.value} map.`
 }
 
-async function loadRooms() {
+async function loadRooms() { // async: can `await` things like network requests
   try {
-    rooms.value = await $fetch('/maps/spn-level1-rooms.json')
+    const lists = await Promise.all(FLOORS.map(option => $fetch(option.rooms))) // $fetch: Nuxt's fetch; loads both floors' JSON at once
+    rooms.value = lists.flatMap((list, i) => list.map(room => ({ ...room, floor: FLOORS[i].level })))
     if (ready.value) setupView()
   } catch (err) {
     console.error(err)
@@ -204,17 +300,20 @@ async function loadRooms() {
   }
 }
 
-function setupView() {
+function setupView() { // first fit of the map
   stopAnimation()
-  const { clientWidth, clientHeight } = mapContainer.value
+  setZoomLimits()
+  resetView()
+  containerSize = { width: mapContainer.value.clientWidth, height: mapContainer.value.clientHeight }
+  viewReady.value = true
+}
 
-  // Zoom out limit: the whole floor fits on screen. Zoom in limit: 8× the start.
+// Zoom out limit: the whole floor fits on screen. Zoom in limit: 8× the start.
+function setZoomLimits() {
+  const { clientWidth, clientHeight } = mapContainer.value
   minScale.value =
     Math.min(clientWidth / imageWidth.value, clientHeight / imageHeight.value) * 0.9
   maxScale.value = startScale() * 8
-
-  resetView()
-  viewReady.value = true
 }
 
 function startScale() {
@@ -254,38 +353,73 @@ function visibleCenter() {
 
 function resetView() {
   if (!ready.value) return
-  const { x, y } = currentLocation.value ?? startPoint.value
+  const point = currentLocation.value ?? startPoint.value
+  const { x, y } = point.floor === mapFloor.value ? point : { x: 0.5, y: 0.5 }
   centerOn(x, y, startScale())
 }
 
 // Compass button: glide back to the user's location (or the lobby while picking)
 function goToMyLocation() {
   if (!ready.value) return
-  const { x, y } = currentLocation.value ?? startPoint.value
-  flyTo(x, y, startScale())
+  showPoint(currentLocation.value ?? startPoint.value, startScale())
+}
+
+// ---- Floors ----
+
+let floorSwitch = null // { x, y, renderedWidth, done } while the other floor's map loads
+
+// Changing `floor` swaps the <img> src; onImageLoad then calls finishFloorSwitch.
+// Returns a promise that resolves once the new floor is on screen.
+function switchFloor(level) {
+  if (level === floor.value || !ready.value) return Promise.resolve()
+  stopAnimation()
+  floorSwitch?.done() // a quicker second tap replaces the first switch
+
+  return new Promise(resolve => {
+    // Remember the view so the new floor opens at about the same spot and zoom.
+    // The two CAD drawings don't line up exactly, so this is approximate.
+    floorSwitch = { ...visibleCenter(), renderedWidth: imageWidth.value * scale.value, done: resolve }
+    floor.value = level
+  })
+}
+
+function finishFloorSwitch() {
+  const { x, y, renderedWidth, done } = floorSwitch
+  floorSwitch = null
+
+  setZoomLimits()
+  const newScale = renderedWidth / imageWidth.value // same width on screen as before
+  centerOn(x, y, Math.min(maxScale.value, Math.max(minScale.value, newScale)))
+  done()
+}
+
+// Glide to a point on any floor, switching floors first if it's on another one
+async function showPoint(point, targetScale = scale.value, whenArrived = null) {
+  await switchFloor(point.floor)
+  flyTo(point.x, point.y, targetScale, whenArrived)
 }
 
 // ---- Setting your location ----
 
-async function confirmLocation() {
+async function confirmLocation() { // "Confirm Location" button
   stopAnimation()
-  const point = visibleCenter() // read before the sheet changes height
+  const point = { ...visibleCenter(), floor: mapFloor.value } // read before the sheet changes height
   currentLocation.value = point
   step.value = 'destination'
 
-  await nextTick() // wait for the taller destination sheet to render
+  await nextTick() // wait for the taller destination sheet to render (Vue updates the page in batches)
   flyTo(point.x, point.y) // glide so the marker sits in the middle of the new visible area
 }
 
-async function changeLocation() {
+async function changeLocation() { // "Change" link in step 2
   stopAnimation()
   selectedRoom.value = null // the destination no longer applies
+  route.value = null // nor does the route
   destinationError.value = ''
   step.value = 'pick'
 
   await nextTick() // wait for the shorter pick sheet to render
-  const { x, y } = currentLocation.value ?? startPoint.value
-  flyTo(x, y) // bring the saved point under the centred marker
+  showPoint(currentLocation.value ?? startPoint.value) // bring the saved point under the centred marker
 }
 
 // ---- Smooth movement ----
@@ -327,7 +461,7 @@ function flyTo(fx, fy, targetScale = scale.value, whenArrived = null) {
   const fromScale = scale.value
   const startTime = performance.now()
 
-  function step(now) {
+  function step(now) { // runs once per screen frame (about 60 times a second) until the glide ends
     const t = Math.min(1, (now - startTime) / FLY_DURATION)
     const e = easeInOutCubic(t)
 
@@ -405,7 +539,7 @@ function pinchInfo() {
   }
 }
 
-function onPointerDown(event) {
+function onPointerDown(event) { // finger or mouse pressed on the map
   stopAnimation()
   // Close the keyboard when the user goes back to the map
   document.activeElement?.blur()
@@ -420,7 +554,7 @@ function onPointerDown(event) {
   if (pointers.size === 2) lastPinch = pinchInfo()
 }
 
-function onPointerMove(event) {
+function onPointerMove(event) { // finger or mouse moved: pan, or pinch-zoom with two fingers
   const previous = pointers.get(event.pointerId)
   if (!previous) return
 
@@ -445,7 +579,7 @@ function onPointerMove(event) {
   }
 }
 
-function onPointerUp(event) {
+function onPointerUp(event) { // finger or mouse lifted: also detects double-taps
   pointers.delete(event.pointerId)
   lastPinch = pointers.size === 2 ? pinchInfo() : null
   isPanning.value = pointers.size > 0 // drop the marker once every finger is up
@@ -468,26 +602,39 @@ function onPointerUp(event) {
 
 // ---- Destination ----
 
-const destination = ref('')
+const destination = ref('') // the search box text (v-model in the template)
 const destinationError = ref('')
 const selectedRoom = ref(null) // the room the pin is shown on (null = no pin)
+const route = ref(null) // { points: [{ x, y }, ...] } in map fractions, start to destination; null = no line
+const routeLoading = ref(false) // true while the route is being found (disables the button)
+const ROUTE_PADDING = 40 // px kept around the route when zooming to fit it
 
-// Rooms that have a name, labelled "LOBBY (1.1)" for the suggestions list
+const routePoints = computed(() => // "x1,y1 x2,y2 ..." for the <polyline>
+  route.value.points.map(({ x, y }) => `${x},${y}`).join(' ')
+)
+
+// Rooms (on every floor) that have a name, labelled "LOBBY (1.1)" for the suggestions list
 const namedRooms = computed(() =>
   rooms.value
     .filter(room => room.name)
     .map(room => ({ ...room, label: `${room.name} (${room.number})` }))
 )
 
-function findRoute() {
+async function findRoute() { // "Find Route" button: find the room, work out the route, glide to it, then drop the pin
   const query = destination.value.trim().toLowerCase()
-  const room = namedRooms.value.find(r =>
-    [r.label, r.number, r.name].some(text => text.toLowerCase() === query)
-  )
+  // A full label like "LOBBY (1.1)" is one room. Numbers and names alone can be shared
+  // (several rooms are 1.1 or STAIRS), so those only count when exactly one room has them.
+  const byLabel = namedRooms.value.find(r => r.label.toLowerCase() === query)
+  const matches = byLabel
+    ? [byLabel]
+    : namedRooms.value.filter(r => [r.number, r.name].some(text => text.toLowerCase() === query))
+  const room = matches.length === 1 ? matches[0] : null
 
   if (!room) {
-    destinationError.value = `Couldn't find "${destination.value.trim()}". Try a room name or number.`
-    selectedRoom.value = null // no match, so remove the old pin
+    destinationError.value = matches.length
+      ? `${matches.length} rooms match "${destination.value.trim()}". Pick one from the list.`
+      : `Couldn't find "${destination.value.trim()}". Try a room name or number.`
+    selectedRoom.value = null // no single match, so remove the old pin
     return
   }
 
@@ -496,41 +643,91 @@ function findRoute() {
 
   stopAnimation() // if a previous search is still gliding, place its pin now
   selectedRoom.value = null // old pin shrinks away while the map glides
+  route.value = null // old route goes away while the new one is found
 
-  // TODO: route calculation + directions screen. For now, show the destination.
-  flyTo(room.x, room.y, startScale(), () => {
+  const start = currentLocation.value
+  if (start.floor !== 1 || room.floor !== 1) { // the route grid (SPN.txt) only covers level 1
+    destinationError.value = 'Routes are only available on level 1 for now.'
+    return showPoint(room, startScale(), () => { selectedRoom.value = room })
+  }
+
+  routeLoading.value = true
+  try {
+    const points = await routeBetween(start, room) // A* runs right here on the phone
+    if (step.value !== 'destination') return // "Change" was tapped while waiting
+    route.value = { points } // setting this draws the line
+  } catch (err) {
+    console.error(err)
+    destinationError.value = err.message || 'Something went wrong finding the route.'
+  } finally { // runs whether it worked or failed
+    routeLoading.value = false
+  }
+
+  await switchFloor(1) // first, so the zoom-to-fit below uses level 1's map size
+  const view = route.value ? routeView(route.value.points) : { x: room.x, y: room.y, scale: startScale() } // no route: just show the room
+  flyTo(view.x, view.y, view.scale, () => {
     selectedRoom.value = room // arrived: the new pin bursts in on screen
   })
 }
 
+function routeView(points) { // centre and zoom that fit the whole route above the sheet
+  const xs = points.map(p => p.x)
+  const ys = points.map(p => p.y)
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  const { clientWidth, clientHeight } = mapContainer.value
+  const visibleHeight = clientHeight - sheet.value.offsetHeight
+
+  const fitScale = Math.min(
+    (clientWidth - 2 * ROUTE_PADDING) / (Math.max(maxX - minX, 1e-6) * imageWidth.value), // 1e-6 avoids dividing by 0 for a straight line
+    (visibleHeight - 2 * ROUTE_PADDING) / (Math.max(maxY - minY, 1e-6) * imageHeight.value)
+  )
+  return {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2,
+    scale: Math.min(maxScale.value, Math.max(minScale.value, fitScale)) // stay inside the zoom limits
+  }
+}
+
 // ---- Lifecycle ----
 
+let containerSize = null // { width, height } of the map container the view was last laid out for
+
+// Keep the same spot in the middle instead of resetting the view, since the Android
+// keyboard resizes the window every time the destination box is focused
 function onResize() {
-  if (ready.value) setupView()
+  if (!ready.value) return
+  if (!containerSize) return setupView()
+  const { clientWidth, clientHeight } = mapContainer.value
+  offsetX.value += (clientWidth - containerSize.width) / 2
+  offsetY.value += (clientHeight - containerSize.height) / 2
+  containerSize = { width: clientWidth, height: clientHeight }
+  setZoomLimits()
+  zoomAboveSheet(1) // pulls the zoom back inside the new limits if needed
 }
 
 // The sheet changes height between steps; the picking marker needs to know
-const sheetObserver = import.meta.client
+const sheetObserver = import.meta.client // only in the browser: Nuxt also renders this page on the server, which has no ResizeObserver
   ? new ResizeObserver(() => { sheetHeight.value = sheet.value?.offsetHeight ?? 0 })
   : null
 
-onMounted(() => {
+onMounted(() => { // runs once the page is on screen in the browser
   // The server-rendered <img> may finish loading before Vue attaches @load
   if (mapImage.value?.complete && mapImage.value.naturalWidth) onImageLoad()
 
   loadRooms()
+  loadRouteGrid().catch(() => {}) // start loading the grid now so Find Route is quick; errors show when it's pressed
   window.addEventListener('resize', onResize)
   sheetObserver.observe(sheet.value)
 })
 
-onBeforeUnmount(() => {
+onBeforeUnmount(() => { // runs when leaving the page: stop animations and listeners so nothing keeps running
   stopAnimation()
   window.removeEventListener('resize', onResize)
   sheetObserver.disconnect()
 })
 </script>
 
-<style scoped>
+<style scoped> /* scoped: these styles only apply to this page */
 .map-page {
   position: relative;
   height: 100%;
@@ -558,49 +755,109 @@ onBeforeUnmount(() => {
 
 /* Map and marker fade in once positioned */
 .floor-plan,
-.location-marker {
+.location-marker,
+.start-pin {
   opacity: 0;
   transition: opacity 0.4s ease;
 }
 
 .floor-plan.shown,
-.location-marker.shown {
+.location-marker.shown,
+.start-pin.shown {
   opacity: 1;
 }
 
-/* The halo circle, with the arrow centred inside it */
+.room-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.room-highlight polygon {
+  fill: var(--color-primary-soft); /* theme colour, see-through */
+  stroke: var(--color-primary);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke; /* 2px on screen at any zoom (the viewBox is only 1 unit wide) */
+}
+
+.route-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none; /* drags go to the map */
+}
+
+.route-line polyline {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke; /* widths in screen pixels at any zoom (the viewBox is only 1 unit wide) */
+}
+
+.route-line .line {
+  stroke: var(--color-primary);
+  stroke-width: 3;
+}
+
+.room-fill-enter-active,
+.room-fill-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.room-fill-enter-from,
+.room-fill-leave-to {
+  opacity: 0;
+}
+
+/* Confirmed location: just the arrow, centred on the point */
 .location-marker {
-  --marker-size: 128px;
-  --marker-lift: 0px; /* the arrow marks the exact spot the user picked */
+  --marker-size: 28px; /* same as the AppLogo size */
 
   position: absolute;
   top: 0;
   left: 0;
   width: var(--marker-size);
   height: var(--marker-size);
-  /* Centre the circle on the map point (the transform moves the top-left corner there) */
-  margin-left: calc(var(--marker-size) / -2);
-  margin-top: calc(var(--marker-size) / -2 - var(--marker-lift));
-
+  margin-left: calc(var(--marker-size) / -2); /* the transform moves the top-left corner to the point */
+  margin-top: calc(var(--marker-size) / -2);
   display: grid;
-  place-items: center; /* arrow in the middle of the circle */
-
-  border-radius: 50%;
-  background: var(--color-primary-soft);
-  border: 1px solid var(--color-primary);
   pointer-events: none;
 }
 
-/* While picking, the arrow floats up as you drag and settles when you let go (like Uber) */
-.location-marker.picking > * {
+/* Green push-pin while picking (two classes so they beat the shared .map-pin rules below) */
+.map-pin.start-pin {
+  --pin-width: 28px; /* 24:36 like its viewBox */
+  --pin-height: 42px;
+}
+
+.start-pin .pin-head {
+  fill: var(--color-start-pin);
+}
+
+.start-pin .pin-shine {
+  fill: #fff;
+  opacity: 0.6; /* soft highlight, like the emoji */
+}
+
+.start-pin .pin-needle {
+  stroke: var(--color-text-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* The pin floats up as you drag and settles when you let go (like Uber) */
+.start-pin svg {
   transition: transform 0.2s ease-out;
 }
 
-.location-marker.picking.lifted > * {
+.start-pin.lifted svg {
   transform: translateY(-10px);
 }
 
-.destination-pin {
+/* Pin shape shared by the start pin and the destination pin */
+.map-pin {
   --pin-width: 36px;
   --pin-height: 48px;
 
@@ -614,7 +871,7 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.destination-pin svg {
+.map-pin svg {
   width: 100%;
   height: 100%;
   overflow: visible;
@@ -622,16 +879,16 @@ onBeforeUnmount(() => {
   transform-origin: bottom center; /* grow and shrink from the tip */
 }
 
-.destination-pin path {
+.map-pin path {
   fill: var(--color-primary);
 }
 
-.destination-pin circle {
+.map-pin circle {
   fill: #fff; /* the white dot in the middle */
 }
 
 /* Ring that bursts out from the tip when the pin lands (hidden otherwise) */
-.destination-pin::after {
+.map-pin::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -720,6 +977,42 @@ onBeforeUnmount(() => {
 
 /* ---------------- CONTROLS ---------------- */
 
+.floor-toggle {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.floor-toggle button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.floor-toggle button.active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.floor-toggle button:disabled {
+  cursor: default;
+}
+
 .map-controls {
   position: absolute;
   right: 16px;
@@ -754,6 +1047,16 @@ onBeforeUnmount(() => {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.accuracy-circle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 2px solid var(--color-primary);
+  border-radius: 50%;
+  background: var(--color-primary-soft); /* see-through, so the rooms show under it */
+  pointer-events: none; /* drags go to the map */
 }
 
 /* ---------------- BOTTOM SHEET ---------------- */

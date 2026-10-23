@@ -1,0 +1,5 @@
+32.993398, -96.751974 // the top right corner of the map
+
+32.993921, -96.752506 // the rightmost corner on the bottom
+
+32.99451913965978, -96.75223137913123 // the leftmost corner

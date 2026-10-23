@@ -31,3 +31,7 @@ logs
 
 # Raw CAD/PDF floor plans (private — never serve or commit)
 cad-source/
+
+# Python bytecode
+__pycache__/
+*.pyc

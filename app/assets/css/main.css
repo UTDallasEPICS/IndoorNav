@@ -8,6 +8,7 @@
   --color-primary: #bfe05b; /* logo, buttons, location marker, highlights */
   --color-on-primary: #1c1c1e; /* text/icons placed on top of the primary colour */
   --color-primary-soft: color-mix(in srgb, var(--color-primary) 35%, transparent); /* location halo */
+  --color-start-pin: var(--color-primary); /* pin used while the user sets their location */
 
   /* Surfaces & text */
   --color-background: #ffffff;
