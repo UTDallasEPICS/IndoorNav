@@ -2,6 +2,7 @@
   "name": "my-nuxt-app",
   "type": "module",
   "private": true,
+  "packageManager": "pnpm@12.5.1",
   "scripts": {
     "build": "nuxt build",
     "dev": "nuxt dev",
@@ -13,15 +14,13 @@
     "cap:android": "nuxt generate && cap sync android && cap open android",
     "cap:run:ios": "nuxt generate && cap run ios",
     "cap:run:android": "nuxt generate && cap run android",
-    "db:generate": "drizzle-kit generate"
-  },
-  "dependencies": {
-    "@capacitor-community/sqlite": "^8.1.1",
+    "db:generate": "drizzle-kit generate",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@capacitor-community/bluetooth-le": "^8.3.0",
+    "@capacitor-community/sqlite": "^8.1.1",
     "@capacitor/android": "^8.5.3",
     "@capacitor/core": "^8.5.3",
     "@capacitor/geolocation": "^8.2.4",
@@ -34,7 +33,6 @@
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
     "drizzle-kit": "^0.31.11",
-    "typescript": "^7.0.2"
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

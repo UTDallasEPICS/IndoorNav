@@ -21,7 +21,7 @@ Samuel Rodriguez (system integration, floor change) · Sneha Lal (UI/UX). Mentor
 | UI framework | **Nuxt 4 / Vue 3** (`<script setup>`), no component library | Team familiarity; small, fast UI. Styles are hand-written CSS using tokens in `app/assets/css/main.css`. |
 | Rendering mode | **Client-only SPA** (`ssr: false` in `nuxt.config.ts`) | `nuxt generate` emits a static bundle the phone loads locally — there is no Node server in the app. Don't add SSR, server routes, or `server/api` endpoints the app depends on. |
 | Native wrapper | **Capacitor 8** (`capacitor.config.ts`, app ID `edu.utdallas.epics.indoornav`) | A plain PWA can't scan BLE on iOS (Safari has no Web Bluetooth; Chrome's scan API is behind a flag) and has no reliable barometer. Capacitor gives native BLE and sensor access with one web codebase for iOS + Android (C01). |
-| Native access | **Capacitor plugins only** | Install the plugin, run `npm run cap:sync`, and add permissions to `ios/App/App/Info.plist` and `android/app/src/main/AndroidManifest.xml`. Don't hand-write Swift/Java unless no plugin exists. |
+| Native access | **Capacitor plugins only** | Install the plugin, run `pnpm cap:sync`, and add permissions to `ios/App/App/Info.plist` and `android/app/src/main/AndroidManifest.xml`. Don't hand-write Swift/Java unless no plugin exists. |
 | Language | TypeScript for new logic modules; existing pages use plain JS `<script setup>` | Match the file you're editing. |
 | Floor plan tooling | **Python + ezdxf** (`scripts/cad-to-svg.py`), `dwg2dxf` from LibreDWG | Offline, free, scriptable for future buildings. |
 | Backend | **None at runtime** (`server/main.py` is a placeholder) | Location stays on the phone (C02) and there's no hosting budget. Any server is for offline tooling only. |
@@ -84,16 +84,16 @@ Accelerometer (step detection) + compass (heading) ──► PDR (dead reckoning
 ### Commands
 
 ```bash
-npm run dev                  # web dev server at localhost:3000 (map UI works; no BLE/sensors in a desktop browser)
-npm run generate             # static build to .output/public
-npm run cap:sync             # build + copy web bundle and plugins into ios/ and android/
-npm run cap:ios              # build, sync, open Xcode
-npm run cap:android          # build, sync, open Android Studio
-npm run cap:run:ios          # build and run on a simulator/device (also cap:run:android)
+pnpm dev                 # web dev server at localhost:3000 (map UI works; no BLE/sensors in a desktop browser)
+pnpm generate            # static build to .output/public
+pnpm cap:sync            # build + copy web bundle and plugins into ios/ and android/
+pnpm cap:ios             # build, sync, open Xcode
+pnpm cap:android         # build, sync, open Android Studio
+pnpm cap:run:ios         # build and run on a simulator/device (also cap:run:android)
 
 # Live reload on a phone: serve on LAN, then point the app at it
-npm run dev -- --host
-CAP_SERVER_URL=http://<LAN-IP>:3000 npx cap run ios   # run plain cap:sync before any release build
+pnpm dev --host
+CAP_SERVER_URL=http://<LAN-IP>:3000 pnpm exec cap run ios   # run plain cap:sync before any release build
 ```
 
 BLE and motion sensors must be tested on **physical iOS and Android devices** — simulators and desktop browsers
