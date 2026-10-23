@@ -1,6 +1,6 @@
-// Converts between the route grid (scripts/nav_io/SPN.txt, cells as [row, col])
+// Converts between the route grid (public/data/SPN.txt, cells as [row, col])
 // and map positions ({ x, y } as fractions 0–1 of the floor plan, like the rooms' x/y).
-// Used by the server (rooms -> grid cells for coords.txt) and the page (path -> line).
+// Used by app/utils/route-between.ts (map positions -> grid cells -> route points).
 
 // SPN.txt was made from a picture of level 1 with an empty border around it, so it
 // doesn't line up with the map on its own. These are the grid rows/columns (fractions

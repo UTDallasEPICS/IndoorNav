@@ -65,14 +65,14 @@
         <polyline class="line" :points="routePoints" /> <!-- lime line through every node, in order -->
       </svg>
 
-      <!-- GPS accuracy circle: you're probably somewhere inside it. Moves and zooms with the map. -->
+      <!-- Accuracy circle: you're probably somewhere inside it. Moves and zooms with the map. -->
       <div
-        v-if="ready && gpsFix && mapFloor === 1"
-        class="gps-circle"
+        v-if="ready && locationFix?.floor === mapFloor"
+        class="accuracy-circle"
         :style="{
-          width: `${gpsRadius * 2}px`,
-          height: `${gpsRadius * 2}px`,
-          transform: `translate(${toScreenX(gpsFix.x)}px, ${toScreenY(gpsFix.y)}px) translate(-50%, -50%)`
+          width: `${accuracyRadius * 2}px`,
+          height: `${accuracyRadius * 2}px`,
+          transform: `translate(${toScreenX(locationFix.x)}px, ${toScreenY(locationFix.y)}px) translate(-50%, -50%)`
         }"
       /> <!-- the second translate centres the circle on the point -->
 
@@ -160,34 +160,11 @@
         </button>
       </div>
 
-      <!-- GPS toggle rides on top of the sheet, on the left -->
-      <div class="gps-controls">
-        <button
-          v-if="step === 'pick'"
-          class="control gps-toggle"
-          :class="{ on: gpsOn, locating: gpsLocating }"
-          type="button"
-          :aria-pressed="gpsOn"
-          :aria-label="floor === 1 ? (gpsOn ? 'Turn GPS off' : 'Turn GPS on') : 'GPS is only available on level 1'"
-          :title="floor === 1 ? '' : 'GPS is only available on level 1'"
-          :disabled="floor !== 1"
-          @click="toggleGps"
-        > <!-- only while setting your location: GPS just gives a rough starting point -->
-          <svg viewBox="0 0 24 24" aria-hidden="true"> <!-- GPS crosshair: ring, centre dot and four ticks -->
-            <circle cx="12" cy="12" r="7" />
-            <circle class="gps-dot" cx="12" cy="12" r="2.5" />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
-            <line v-if="!gpsOn" class="gps-slash" x1="4" y1="4" x2="20" y2="20" /> <!-- slash = GPS off -->
-          </svg>
-        </button>
-      </div>
-
       <template v-if="step === 'pick'"> <!-- <template> groups elements without adding an extra <div> -->
         <div class="sheet-header">
           <h2>Set Your Location</h2>
         </div>
         <p class="sheet-hint">Move the map so the marker is where you are.</p>
-        <p v-if="gpsMessage" class="gps-message">{{ gpsMessage }}</p>
 
         <button class="primary-button" type="button" :disabled="!ready" @click="confirmLocation">
           Confirm Location
@@ -232,8 +209,7 @@
 </template>
 
 <script setup> // "setup": everything declared here can be used in the template above
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { makeGpsToMap, isOnMap } from '#shared/geo-map' // shared/geo-map.js: GPS lat/lng -> map position { x, y }
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { routeBetween, loadRouteGrid } from '~/utils/route-between' // A* on the device: two map positions -> route points
 
 const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
@@ -280,78 +256,14 @@ const step = ref('pick')
 const currentLocation = ref(null) // { x, y, floor } the user confirmed, null until then
 const isPanning = ref(false) // finger/mouse is down on the map (lifts the marker)
 const sheetHeight = ref(0) // kept in sync with the sheet so the marker stays centred above it
-const gpsOn = ref(false) // GPS toggle; off by default, so you pin your location by hand
-const gpsLocating = ref(false) // waiting for a reading (the button pulses)
-const gpsFix = ref(null) // { x, y, accuracy } of the last reading, accuracy in metres; null = no circle
-const gpsMessage = ref('') // shown under the sheet hint
-let gpsConverter = null // made from spn-georef.json the first time GPS is turned on
+const locationFix = ref(null) // { x, y, floor, accuracy } from the location subsystem, accuracy in metres; null = no circle
 
-const GPS_CIRCLE = 10 // circle radius in metres, whatever accuracy the browser reports
+// How much of the plan's width one metre covers (from the building's surveyed corners)
+const WIDTH_PER_METER = 0.00782
 
-const gpsRadius = computed(() => // circle radius in screen px (metres -> plan widths -> px)
-  gpsFix.value ? GPS_CIRCLE * gpsConverter.widthPerMeter * imageWidth.value * scale.value : 0
+const accuracyRadius = computed(() => // circle radius in screen px (metres -> plan widths -> px)
+  locationFix.value ? locationFix.value.accuracy * WIDTH_PER_METER * imageWidth.value * scale.value : 0
 )
-
-// Codes from the browser's GeolocationPositionError
-const GPS_ERRORS = { 1: 'Location permission was denied.', 2: "Couldn't get a GPS signal.", 3: 'GPS took too long to respond.' }
-
-async function toggleGps() { // GPS button
-  if (gpsOn.value) {
-    gpsMessage.value = ''
-    return stopGps()
-  }
-  if (!navigator.geolocation || !window.isSecureContext) { // browsers only share location on https:// or localhost
-    gpsMessage.value = 'GPS needs a secure (https) connection.'
-    return
-  }
-  gpsMessage.value = ''
-  gpsOn.value = true
-  gpsLocating.value = true
-  try {
-    gpsConverter ??= makeGpsToMap((await $fetch('/maps/spn-georef.json')).points) // ??= only loads it the first time
-  } catch (err) {
-    console.error(err)
-    gpsMessage.value = 'Failed to load the GPS reference points.'
-    return stopGps()
-  }
-  navigator.geolocation.getCurrentPosition(onGpsReading, onGpsError, { // one reading; you fine-tune the spot by hand
-    enableHighAccuracy: true, // ask for real GPS, not just Wi-Fi/IP
-    timeout: 15000,
-    maximumAge: 0 // no old cached position
-  })
-}
-
-function onGpsReading({ coords }) {
-  if (!gpsOn.value) return // turned off before the reading arrived
-  gpsLocating.value = false
-  const point = gpsConverter.toMap({ lat: coords.latitude, lng: coords.longitude })
-  if (!isOnMap(point)) {
-    gpsMessage.value = "You're not in SPN. Pin your location instead."
-    return stopGps()
-  }
-  gpsFix.value = { ...point, accuracy: coords.accuracy }
-  gpsMessage.value = 'GPS found your approximate location. Move the map to your exact spot.' // no metres: the circle is capped, so the real figure would contradict it
-  stopAnimation()
-  showPoint({ ...point, floor: 1 }) // glide there, so the 📍 starts on the GPS spot
-}
-
-function onGpsError(err) {
-  if (!gpsOn.value) return
-  gpsMessage.value = `${GPS_ERRORS[err.code] ?? 'GPS failed.'} Pin your location instead.`
-  stopGps()
-}
-
-function stopGps() { // keeps gpsMessage, so the reason it stopped stays on screen
-  gpsOn.value = false
-  gpsLocating.value = false
-  gpsFix.value = null
-}
-
-watch(floor, level => { if (level !== 1) stopGps() }) // watch(): runs when `floor` changes. GPS is level 1 only for now
-watch(step, () => { // circle and message go away once the location is confirmed
-  stopGps()
-  gpsMessage.value = ''
-})
 
 const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0) // map image and rooms both loaded
 
@@ -388,10 +300,11 @@ async function loadRooms() { // async: can `await` things like network requests
   }
 }
 
-function setupView() { // first fit of the map (also on window resize)
+function setupView() { // first fit of the map
   stopAnimation()
   setZoomLimits()
   resetView()
+  containerSize = { width: mapContainer.value.clientWidth, height: mapContainer.value.clientHeight }
   viewReady.value = true
 }
 
@@ -709,13 +622,19 @@ const namedRooms = computed(() =>
 
 async function findRoute() { // "Find Route" button: find the room, work out the route, glide to it, then drop the pin
   const query = destination.value.trim().toLowerCase()
-  const room = namedRooms.value.find(r =>
-    [r.label, r.number, r.name].some(text => text.toLowerCase() === query)
-  )
+  // A full label like "LOBBY (1.1)" is one room. Numbers and names alone can be shared
+  // (several rooms are 1.1 or STAIRS), so those only count when exactly one room has them.
+  const byLabel = namedRooms.value.find(r => r.label.toLowerCase() === query)
+  const matches = byLabel
+    ? [byLabel]
+    : namedRooms.value.filter(r => [r.number, r.name].some(text => text.toLowerCase() === query))
+  const room = matches.length === 1 ? matches[0] : null
 
   if (!room) {
-    destinationError.value = `Couldn't find "${destination.value.trim()}". Try a room name or number.`
-    selectedRoom.value = null // no match, so remove the old pin
+    destinationError.value = matches.length
+      ? `${matches.length} rooms match "${destination.value.trim()}". Pick one from the list.`
+      : `Couldn't find "${destination.value.trim()}". Try a room name or number.`
+    selectedRoom.value = null // no single match, so remove the old pin
     return
   }
 
@@ -771,8 +690,19 @@ function routeView(points) { // centre and zoom that fit the whole route above t
 
 // ---- Lifecycle ----
 
+let containerSize = null // { width, height } of the map container the view was last laid out for
+
+// Keep the same spot in the middle instead of resetting the view, since the Android
+// keyboard resizes the window every time the destination box is focused
 function onResize() {
-  if (ready.value) setupView()
+  if (!ready.value) return
+  if (!containerSize) return setupView()
+  const { clientWidth, clientHeight } = mapContainer.value
+  offsetX.value += (clientWidth - containerSize.width) / 2
+  offsetY.value += (clientHeight - containerSize.height) / 2
+  containerSize = { width: clientWidth, height: clientHeight }
+  setZoomLimits()
+  zoomAboveSheet(1) // pulls the zoom back inside the new limits if needed
 }
 
 // The sheet changes height between steps; the picking marker needs to know
@@ -1119,54 +1049,7 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   stroke-linejoin: round;
 }
 
-.gps-controls {
-  position: absolute;
-  left: 16px;
-  bottom: calc(100% + 16px); /* just above the sheet, level with the compass button */
-}
-
-.gps-toggle {
-  transition: background 0.2s ease, opacity 0.2s ease;
-}
-
-.gps-toggle svg {
-  stroke: var(--color-text-muted); /* grey while off */
-}
-
-.gps-toggle .gps-dot {
-  fill: var(--color-text-muted);
-  stroke: none;
-}
-
-.gps-toggle.on {
-  background: var(--color-primary); /* theme colour while on */
-  border-color: var(--color-primary);
-}
-
-.gps-toggle.on svg {
-  stroke: var(--color-on-primary);
-}
-
-.gps-toggle.on .gps-dot {
-  fill: var(--color-on-primary);
-}
-
-.gps-toggle:disabled {
-  opacity: 0.4; /* faded on level 2 */
-  cursor: default;
-}
-
-.gps-toggle.locating {
-  animation: gps-pulse 1s ease-in-out infinite alternate; /* while waiting for a reading */
-}
-
-@keyframes gps-pulse {
-  to {
-    opacity: 0.5;
-  }
-}
-
-.gps-circle {
+.accuracy-circle {
   position: absolute;
   top: 0;
   left: 0;
@@ -1174,12 +1057,6 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   border-radius: 50%;
   background: var(--color-primary-soft); /* see-through, so the rooms show under it */
   pointer-events: none; /* drags go to the map */
-}
-
-.gps-message {
-  margin: -8px 0 16px; /* tucks under the sheet hint */
-  color: var(--color-text);
-  font-size: 13px;
 }
 
 /* ---------------- BOTTOM SHEET ---------------- */

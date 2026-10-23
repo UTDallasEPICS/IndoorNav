@@ -9,8 +9,8 @@ Output file: one "row,col" pair per line, from start to destination.
 Usage:
     python astar_grid.py
 
-Reads SPN.txt and coords.txt (next to this script) and writes the path to
-path.txt. coords.txt holds two lines: start as row,col, then destination as
+Reads public/data/SPN.txt and nav_io/coords.txt and writes the path to
+nav_io/path.txt. coords.txt holds two lines: start as row,col, then destination as
 row,col. Movement is 8-directional (diagonals allowed,
 no cutting between two diagonally touching walls).
 """
@@ -23,7 +23,7 @@ import sys
 SQRT2 = math.sqrt(2.0)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FILE = os.path.join(BASE_DIR, "nav_io", "SPN.txt")
+INPUT_FILE = os.path.join(BASE_DIR, "..", "public", "data", "SPN.txt")  # the same grid the app routes on
 COORDS_FILE = os.path.join(BASE_DIR, "nav_io", "coords.txt")
 OUTPUT_FILE = os.path.join(BASE_DIR, "nav_io", "path.txt")
 DIAGONAL = True
@@ -222,7 +222,7 @@ def main():
 
     print(f"Path found: {len(path)} cells. Written to {OUTPUT_FILE}")
 
-    if "--no-plot" not in sys.argv:  # the app's /api/route passes --no-plot (no window to show on a server)
+    if "--no-plot" not in sys.argv:  # --no-plot skips the preview window
         import matplotlib.pyplot as plt  # only needed for this preview
         plt.matshow(grid)
         plt.show()

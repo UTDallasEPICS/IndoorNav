@@ -1,5 +1,5 @@
 // Snaps a point onto walkable floor before routing, since room labels often sit on a
-// wall line or on leftover text in the grid. Moved from server/api/route.post.js.
+// wall line or on leftover text in the grid.
 import type { Cell, Grid } from './astar'
 
 const SNAP_RADIUS = 15 // how far to look, in grid cells (about 15 cm each)
