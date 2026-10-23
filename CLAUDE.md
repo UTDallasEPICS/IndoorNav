@@ -172,6 +172,8 @@ Decision drivers to respect:
 
 ### System integration — Samuel (R04)
 - [ ] Map, location, and pathfinding modules wired together behind one interface for the UI.
+  - 2026-10-23: `app/composables/useNavigation.ts` wired into `map.vue` (live `MapPosition` + `routeTo`). Not yet
+    verified on a device: needs SPN1 beacon entries in `app/utils/location/venues/spn.ts`.
 - [ ] Floor change detection switches to the matching floor plan (barometer where available). *Milestone: Nov 13*
 - [ ] Test plan running alongside development: multi-path routes, elevator/stairs, location updates while walking.
 

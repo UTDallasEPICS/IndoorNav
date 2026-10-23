@@ -209,8 +209,11 @@
 </template>
 
 <script setup> // "setup": everything declared here can be used in the template above
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { routeBetween, loadRouteGrid } from '~/utils/route-between' // A* on the device: two map positions -> route points
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { loadRouteGrid } from '~/utils/route-between'
+
+// Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
+const { position: locationFix, startLocation, stopLocation, canRoute, routeTo } = useNavigation()
 
 const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
 const mapImage = ref(null) // the <img> floor plan
@@ -256,13 +259,12 @@ const step = ref('pick')
 const currentLocation = ref(null) // { x, y, floor } the user confirmed, null until then
 const isPanning = ref(false) // finger/mouse is down on the map (lifts the marker)
 const sheetHeight = ref(0) // kept in sync with the sheet so the marker stays centred above it
-const locationFix = ref(null) // { x, y, floor, accuracy } from the location subsystem, accuracy in metres; null = no circle
 
 // How much of the plan's width one metre covers (from the building's surveyed corners)
 const WIDTH_PER_METER = 0.00782
 
 const accuracyRadius = computed(() => // circle radius in screen px (metres -> plan widths -> px)
-  locationFix.value ? locationFix.value.accuracy * WIDTH_PER_METER * imageWidth.value * scale.value : 0
+  locationFix.value ? locationFix.value.accuracyM * WIDTH_PER_METER * imageWidth.value * scale.value : 0
 )
 
 const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0) // map image and rooms both loaded
@@ -353,16 +355,24 @@ function visibleCenter() {
 
 function resetView() {
   if (!ready.value) return
-  const point = currentLocation.value ?? startPoint.value
+  const point = currentLocation.value ?? locationFix.value ?? startPoint.value
   const { x, y } = point.floor === mapFloor.value ? point : { x: 0.5, y: 0.5 }
   centerOn(x, y, startScale())
 }
 
-// Compass button: glide back to the user's location (or the lobby while picking)
+// Compass button: glide back to the user's location (while picking: the live location, else the lobby)
 function goToMyLocation() {
   if (!ready.value) return
-  showPoint(currentLocation.value ?? startPoint.value, startScale())
+  showPoint(currentLocation.value ?? locationFix.value ?? startPoint.value, startScale())
 }
+
+// The first live fix while picking: bring it under the marker so the user only has to confirm it
+let movedToFix = false
+watch(() => ready.value && locationFix.value, fix => {
+  if (!fix || movedToFix || step.value !== 'pick' || isPanning.value) return
+  movedToFix = true
+  showPoint(fix, startScale())
+})
 
 // ---- Floors ----
 
@@ -646,14 +656,14 @@ async function findRoute() { // "Find Route" button: find the room, work out the
   route.value = null // old route goes away while the new one is found
 
   const start = currentLocation.value
-  if (start.floor !== 1 || room.floor !== 1) { // the route grid (SPN.txt) only covers level 1
+  if (!canRoute(start, room)) { // the route grid (SPN.txt) only covers level 1
     destinationError.value = 'Routes are only available on level 1 for now.'
     return showPoint(room, startScale(), () => { selectedRoom.value = room })
   }
 
   routeLoading.value = true
   try {
-    const points = await routeBetween(start, room) // A* runs right here on the phone
+    const points = await routeTo(start, room) // A* runs right here on the phone
     if (step.value !== 'destination') return // "Change" was tapped while waiting
     route.value = { points } // setting this draws the line
   } catch (err) {
@@ -716,12 +726,14 @@ onMounted(() => { // runs once the page is on screen in the browser
 
   loadRooms()
   loadRouteGrid().catch(() => {}) // start loading the grid now so Find Route is quick; errors show when it's pressed
+  startLocation() // BLE positioning; if it's unavailable the user just places themselves by hand
   window.addEventListener('resize', onResize)
   sheetObserver.observe(sheet.value)
 })
 
 onBeforeUnmount(() => { // runs when leaving the page: stop animations and listeners so nothing keeps running
   stopAnimation()
+  stopLocation()
   window.removeEventListener('resize', onResize)
   sheetObserver.disconnect()
 })

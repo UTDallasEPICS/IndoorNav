@@ -3,18 +3,23 @@
 Finds the user's position on-device from BLE beacons (indoors) and GPS (outdoors), and emits one
 smoothed stream of `LocationFix`es for the map UI and routing. Nothing here talks to a server (C02).
 
-```ts
-import { createDeviceLocationService } from '~/utils/location/LocationService'
+The app reaches it through the core module, `app/composables/useNavigation.ts` (`position`, `startLocation`,
+`routeTo`, ...). To use the service directly:
 
-const location = createDeviceLocationService({ ble: { estimator: 'leastSquares' } })
-const unsubscribe = location.subscribe((fix) => { /* fix.enu, fix.floorId, fix.accuracyM, ... */ })
+```ts
+import { createDeviceLocationService, spnVenue } from '~/utils/location/LocationService'
+
+const location = createDeviceLocationService({ gps: false })
+const unsubscribe = location.subscribePosition((p) => { /* p.x, p.y (map fractions), p.floor, p.accuracyM */ })
+location.subscribe((fix) => { /* raw fused fix: fix.enu, fix.floorId, fix.accuracyM, ... */ })
 location.onEvent((event) => { /* floorChanged, buildingEntered, ... */ })
 location.onStatus((status) => { /* e.g. { provider: 'ble', state: 'permission-denied' } */ })
-await location.start(venue)
+await location.start(spnVenue)
 // later: unsubscribe(); await location.stop()
 ```
 
-`LocationService.ts` is the only file the app should import. Everything else is internal.
+`LocationService.ts` is the only file the app should import (it re-exports the types and `spnVenue`).
+Everything else is internal.
 
 > Nuxt auto-imports only top-level files in `app/utils/`, so nothing in this folder is auto-imported.
 > Import it explicitly as above. Don't add an `index.ts` here.
@@ -34,9 +39,12 @@ await location.start(venue)
   `scale` meters, and the plan is rotated so its "up" points at compass bearing `rotationDeg`
   (0 = north-up). `floorZ` is the floor's ENU height. Use `planToEnu` and `enuToPlan` in `geo/floorTransform.ts`.
 - The rest of the repo stores map positions as **fractions (0–1)** of the SVG's width and height
-  (see CLAUDE.md). To go between that and plan units, multiply or divide by the plan's size in pixels
-  or cells, e.g. `{ x: fx * 226, y: fy * 478 }` for the SPN1 grid. *This assumes the grid and SVG cover
-  the same frame. Confirm with Bao.*
+  (see CLAUDE.md). A floor's optional `plan: { width, height }` is the SVG's size in plan units;
+  `toMapPosition` (`mapPosition.ts`) divides by it to turn a fused fix into a `MapPosition`
+  `{ x, y, floor, accuracyM, timestamp }`. Floors without `plan` produce no `MapPosition`.
+- **SPN1** (`venues/spn.ts`): plan units are map widths (the plan is 1 × 0.457867). The level 1 transform
+  is fitted (`geo/georef.ts`) from three satellite-surveyed corners: 0.76 m RMS, map ≈ 126 m wide,
+  map "up" ≈ east. Its `beacons` list is **empty** until the AP survey is done, so no fixes come out yet.
 - Every fix has `enu` + `floorId` (null outdoors) + `wgs84`. `accuracyM` is roughly a 1-sigma horizontal
   radius. Headings are degrees clockwise from **true** north.
 
