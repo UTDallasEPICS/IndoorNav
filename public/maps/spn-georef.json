@@ -1,8 +1,0 @@
-{
-  "level": 1,
-  "points": [
-    { "corner": "top right of UT Design 1.2", "lat": 32.993398, "lng": -96.751974, "x": 0.985, "y": 0.044 },
-    { "corner": "bottom right of the lower wing, below 1.111", "lat": 32.993921, "lng": -96.752506, "x": 0.515, "y": 0.912 },
-    { "corner": "far left tip of Wellness Center 1.700", "lat": 32.99451913965978, "lng": -96.75223137913123, "x": 0.002, "y": 0.474 }
-  ]
-}
