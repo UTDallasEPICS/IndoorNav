@@ -3,7 +3,7 @@ import { planToEnu } from './geo/floorTransform'
 import { fitFloorTransform } from './geo/georef'
 import { enuToWgs84 } from './geo/wgs84'
 import { LocationService } from './LocationService'
-import { toMapPosition } from './mapPosition'
+import { headingOnPlan, toMapPosition } from './mapPosition'
 import { BleProvider } from './providers/ble/BleProvider'
 import { distanceToRssi } from './providers/ble/pathLoss'
 import { MockBleScanner } from './providers/ble/scanner'
@@ -55,6 +55,24 @@ describe('toMapPosition', () => {
     expect(toMapPosition({
       enu, wgs84: SPN_ORIGIN, floorId: null, buildingId: null, accuracyM: 5, timestamp: 0, source: 'fused', isIndoor: false
     }, index)).toBeNull()
+  })
+})
+
+describe('headingOnPlan', () => {
+  it('is the compass bearing on a north-up plan', () => {
+    expect(headingOnPlan(0, 0)).toBeCloseTo(0)
+    expect(headingOnPlan(90, 0)).toBeCloseTo(90)
+    expect(headingOnPlan(225, 0)).toBeCloseTo(225)
+  })
+
+  it('agrees with where planToEnu puts the plan\'s up and right on a rotated plan', () => {
+    const transform: FloorTransform = { floorId: 'f', origin: { e: 0, n: 0 }, rotationDeg: 33, scale: 1, floorZ: 0 }
+    const bearingOf = (x: number, y: number) => {
+      const { e, n } = planToEnu({ x, y }, transform)
+      return (Math.atan2(e, n) * 180 / Math.PI + 360) % 360
+    }
+    expect(headingOnPlan(bearingOf(0, -1), 33)).toBeCloseTo(0) // walking toward the map's top
+    expect(headingOnPlan(bearingOf(1, 0), 33)).toBeCloseTo(90) // toward its right edge
   })
 })
 

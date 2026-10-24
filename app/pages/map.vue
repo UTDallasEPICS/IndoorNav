@@ -1,5 +1,5 @@
 <template> <!-- the page's HTML. <script setup> below holds the logic, <style scoped> the CSS -->
-  <!-- MAP PAGE: your live location is a green dot kept in the middle of the screen; search a room
+  <!-- MAP PAGE: your live location is an arrow kept in the middle of the screen; search a room
        and the map glides there and drops a pin. The 📍 button (bottom left) lets you set your
        location by hand instead: drag the map under the pin and confirm. -->
   <div class="map-page">
@@ -93,13 +93,15 @@
         </svg>
       </div>
 
-      <!-- "You are here" green dot pinned to the map. Same size on screen at any zoom. -->
+      <!-- "You are here" arrow pinned to the map, pointing the way you're heading. Same size on screen at any zoom. -->
       <div
         v-else-if="ready && userLocation?.floor === mapFloor"
-        class="location-dot"
+        class="location-marker"
         :class="{ shown: viewReady }"
         :style="{ transform: `translate(${toScreenX(userLocation.x)}px, ${toScreenY(userLocation.y)}px)` }"
-      /> <!-- v-else-if: shown when the v-if above is false; moves with the map via toScreenX/Y -->
+      > <!-- v-else-if: shown when the v-if above is false; moves with the map via toScreenX/Y -->
+        <AppLogo :size="28" :style="{ transform: `rotate(${markerRotation}deg)` }" /> <!-- components/AppLogo.vue -->
+      </div>
 
       <!-- Destination pin: the tip of the pin sits on the searched room -->
       <!-- out-in: the old pin shrinks away first, then the new one bursts in -->
@@ -282,8 +284,18 @@ const startPoint = computed(() =>
 // 'destination' = searching where to go, 'pick' = user is placing their location by hand (📍 button)
 const step = ref('destination')
 const manualLocation = ref(null) // { x, y, floor } the user set by hand; wins over the live location until cleared
-const userLocation = computed(() => manualLocation.value ?? locationFix.value) // where the green dot is and routes start; null = unknown
-const following = ref(true) // keep the green dot in the middle of the screen; dragging the map stops it
+const userLocation = computed(() => manualLocation.value ?? locationFix.value) // where the arrow is and routes start; null = unknown
+const following = ref(true) // keep the arrow in the middle of the screen; dragging the map stops it
+
+// Which way the arrow points, in degrees clockwise from the map's up. Comes from sensor fusion
+// (direction of travel); kept when a fix has none (e.g. standing still) so the arrow doesn't snap back to up.
+const markerRotation = ref(0)
+watch(() => locationFix.value?.headingDeg, heading => {
+  if (heading == null) return
+  // Turn the short way round: 350° -> 10° should rotate +20°, not -340° (the CSS transition animates the number)
+  const delta = ((heading - markerRotation.value) % 360 + 540) % 360 - 180
+  markerRotation.value += delta
+})
 const isPanning = ref(false) // finger/mouse is down on the map (lifts the marker)
 const sheetHeight = ref(0) // kept in sync with the sheet so the marker stays centred above it
 
@@ -394,7 +406,7 @@ function goToMyLocation() {
   showPoint(userLocation.value ?? startPoint.value, startScale())
 }
 
-// Keep the green dot centred as live fixes come in, until the user drags the map away
+// Keep the arrow centred as live fixes come in, until the user drags the map away
 watch(() => ready.value && userLocation.value, point => {
   if (!point || !following.value || step.value === 'pick' || isPanning.value) return
   showPoint(point)
@@ -819,14 +831,14 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 
 /* Map and marker fade in once positioned */
 .floor-plan,
-.location-dot,
+.location-marker,
 .start-pin {
   opacity: 0;
   transition: opacity 0.4s ease;
 }
 
 .floor-plan.shown,
-.location-dot.shown,
+.location-marker.shown,
 .start-pin.shown {
   opacity: 1;
 }
@@ -875,22 +887,23 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   opacity: 0;
 }
 
-/* You are here: green dot with a white ring, centred on the point */
-.location-dot {
-  --dot-size: 18px;
+/* You are here: the app's arrow, centred on the point and turned to the heading */
+.location-marker {
+  --marker-size: 28px; /* same as the AppLogo size */
 
   position: absolute;
   top: 0;
   left: 0;
-  width: var(--dot-size);
-  height: var(--dot-size);
-  margin-left: calc(var(--dot-size) / -2); /* the transform moves the top-left corner to the point */
-  margin-top: calc(var(--dot-size) / -2);
-  border: 3px solid #fff;
-  border-radius: 50%;
-  background: var(--color-location);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  width: var(--marker-size);
+  height: var(--marker-size);
+  margin-left: calc(var(--marker-size) / -2); /* the transform moves the top-left corner to the point */
+  margin-top: calc(var(--marker-size) / -2);
+  display: grid;
   pointer-events: none;
+}
+
+.location-marker svg {
+  transition: transform 0.3s ease-out; /* turns smoothly between heading updates */
 }
 
 /* Green push-pin while picking (two classes so they beat the shared .map-pin rules below) */

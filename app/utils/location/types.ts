@@ -55,6 +55,8 @@ export interface MapPosition {
   floor: number
   /** Margin of error: roughly a 1-sigma horizontal radius, in meters */
   accuracyM: number
+  /** Direction of travel from sensor fusion, in degrees clockwise from the map's up; absent when unknown */
+  headingDeg?: number
   /** Milliseconds since the Unix epoch */
   timestamp: number
 }
