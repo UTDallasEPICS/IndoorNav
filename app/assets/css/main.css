@@ -9,7 +9,7 @@
   --color-on-primary: #1c1c1e; /* text/icons placed on top of the primary colour */
   --color-primary-soft: color-mix(in srgb, var(--color-primary) 35%, transparent); /* location halo */
   --color-start-pin: var(--color-primary); /* pin used while the user sets their location */
-  --color-location: #34c759; /* accuracy circle around "you are here" */
+  --color-location: var(--color-primary); /* accuracy circle around "you are here" */
   --color-location-soft: color-mix(in srgb, var(--color-location) 20%, transparent);
 
   /* Surfaces & text */
