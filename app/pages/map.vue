@@ -213,16 +213,30 @@
             v-model="destination"
             class="destination-input"
             type="text"
-            list="room-list"
             placeholder="Where to take you to?"
             enterkeyhint="go"
             autocomplete="off"
             aria-label="Destination"
+            aria-controls="room-suggestions"
+            :aria-expanded="showSuggestions"
+            @focus="suggestionsOpen = true"
+            @input="suggestionsOpen = true"
+            @blur="suggestionsOpen = false"
           > <!-- v-model: the input and `destination` in the script stay in sync both ways -->
-          <!-- Suggestions while typing, from the rooms in the CAD drawing -->
-          <datalist id="room-list">
-            <option v-for="room in namedRooms" :key="room.label" :value="room.label" />
-          </datalist>
+          <!-- Suggestions while typing, from the rooms in the CAD drawing. Not a <datalist>: iOS draws
+               every option in a native popover that freezes the WebView and overflows its own box. -->
+          <ul v-if="showSuggestions" id="room-suggestions" class="suggestions" role="listbox">
+            <li
+              v-for="room in suggestions"
+              :key="`${room.floor}-${room.label}`"
+              class="suggestion"
+              role="option"
+              @mousedown.prevent
+              @click="pickSuggestion(room)"
+            > <!-- mousedown.prevent keeps the input focused, so the tap isn't lost to blur -->
+              {{ room.label }}<span v-if="room.floor !== 1" class="suggestion-floor">Level {{ room.floor }}</span>
+            </li>
+          </ul>
 
           <p v-if="destinationError" class="destination-error">{{ destinationError }}</p>
 
@@ -688,6 +702,32 @@ const namedRooms = computed(() =>
     .filter(room => room.name)
     .map(room => ({ ...room, label: `${room.name} (${room.number})` }))
 )
+
+const suggestionsOpen = ref(false) // true while the input is focused, until a suggestion is picked
+const MAX_SUGGESTIONS = 30
+
+// Rooms whose label contains what's typed, ones that start with it first
+const suggestions = computed(() => {
+  const query = destination.value.trim().toLowerCase()
+  if (!query) return namedRooms.value.slice(0, MAX_SUGGESTIONS)
+  const starts = []
+  const contains = []
+  for (const room of namedRooms.value) {
+    const label = room.label.toLowerCase()
+    if (label === query) return [] // already a full label: nothing left to suggest
+    if (label.startsWith(query) || room.number.startsWith(query)) starts.push(room)
+    else if (label.includes(query)) contains.push(room)
+  }
+  return starts.concat(contains).slice(0, MAX_SUGGESTIONS)
+})
+
+const showSuggestions = computed(() => suggestionsOpen.value && suggestions.value.length > 0)
+
+function pickSuggestion(room) {
+  destination.value = room.label
+  destinationError.value = ''
+  suggestionsOpen.value = false
+}
 
 async function findRoute() { // "Find Route" button: find the room, work out the route, glide to it, then drop the pin
   const query = destination.value.trim().toLowerCase()
@@ -1218,6 +1258,38 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 
 .destination-input::placeholder {
   color: var(--color-text-muted);
+}
+
+.suggestions {
+  max-height: 200px;
+  margin: -10px 0 16px;
+  padding: 4px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* scrolling the list doesn't drag the page */
+  -webkit-overflow-scrolling: touch;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.suggestion {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.suggestion:active {
+  background: var(--color-border);
+}
+
+.suggestion-floor {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
 }
 
 .destination-error {
