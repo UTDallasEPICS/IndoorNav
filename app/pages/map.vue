@@ -1,6 +1,7 @@
 <template> <!-- the page's HTML. <script setup> below holds the logic, <style scoped> the CSS -->
-  <!-- MAP PAGE: step 1 = drag the map under the 📍 and confirm your location,
-       step 2 = search a room; the map glides there and drops a pin -->
+  <!-- MAP PAGE: your live location is an arrow kept in the middle of the screen; search a room
+       and the map glides there and drops a pin. The 📍 button (bottom left) lets you set your
+       location by hand instead: drag the map under the pin and confirm. -->
   <div class="map-page">
     <!-- Map fills the whole screen; the controls and bottom sheet float on top -->
     <main
@@ -65,9 +66,10 @@
         <polyline class="line" :points="routePoints" /> <!-- lime line through every node, in order -->
       </svg>
 
-      <!-- Accuracy circle: you're probably somewhere inside it. Moves and zooms with the map. -->
+      <!-- Accuracy circle: you're probably somewhere inside it. Moves and zooms with the map.
+           Only for the live location; a location you set by hand is exact. -->
       <div
-        v-if="ready && locationFix?.floor === mapFloor"
+        v-if="ready && step !== 'pick' && !manualLocation && locationFix?.floor === mapFloor"
         class="accuracy-circle"
         :style="{
           width: `${accuracyRadius * 2}px`,
@@ -76,7 +78,7 @@
         }"
       /> <!-- the second translate centres the circle on the point -->
 
-      <!-- Step 1: marker fixed in the middle of the visible map; the map moves under it -->
+      <!-- Setting your location by hand: marker fixed in the middle of the visible map; the map moves under it -->
       <div
         v-if="ready && step === 'pick'"
         class="map-pin start-pin"
@@ -91,14 +93,14 @@
         </svg>
       </div>
 
-      <!-- Step 2: "You are here" marker pinned to the map. Same size on screen at any zoom. -->
+      <!-- "You are here" arrow pinned to the map, pointing the way you're heading. Same size on screen at any zoom. -->
       <div
-        v-else-if="ready && currentLocation?.floor === mapFloor"
+        v-else-if="ready && userLocation?.floor === mapFloor"
         class="location-marker"
         :class="{ shown: viewReady }"
-        :style="{ transform: `translate(${toScreenX(currentLocation.x)}px, ${toScreenY(currentLocation.y)}px)` }"
+        :style="{ transform: `translate(${toScreenX(userLocation.x)}px, ${toScreenY(userLocation.y)}px)` }"
       > <!-- v-else-if: shown when the v-if above is false; moves with the map via toScreenX/Y -->
-        <AppLogo :size="28" /> <!-- components/AppLogo.vue (Nuxt imports components automatically) -->
+        <AppLogo :size="28" :style="{ transform: `rotate(${markerRotation}deg)` }" /> <!-- components/AppLogo.vue -->
       </div>
 
       <!-- Destination pin: the tip of the pin sits on the searched room -->
@@ -142,8 +144,26 @@
       </button>
     </div>
 
-    <!-- Bottom sheet: step 1 sets your location, step 2 searches the destination -->
+    <!-- Bottom sheet: searches the destination, or sets your location by hand -->
     <section ref="sheet" class="sheet">
+      <!-- Set-location button rides on top of the sheet, on the left -->
+      <div class="map-controls left">
+        <button
+          class="control"
+          :class="{ active: step === 'pick' }"
+          type="button"
+          :aria-pressed="step === 'pick'"
+          aria-label="Set my location on the map"
+          :disabled="!ready"
+          @click="step === 'pick' ? cancelPicking() : startPicking()"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="8" r="5" />
+            <path d="M12 13v9" />
+          </svg>
+        </button>
+      </div>
+
       <!-- Map controls ride on top of the sheet, on the right -->
       <div class="map-controls">
         <button class="control" aria-label="Zoom in" @click="zoomIn"> <!-- @click runs zoomIn() from the script -->
@@ -164,21 +184,28 @@
         <div class="sheet-header">
           <h2>Set Your Location</h2>
         </div>
-        <p class="sheet-hint">Move the map so the marker is where you are.</p>
+        <p class="sheet-hint">
+          Move the map so the marker is where you are.
+          <button class="link-button" type="button" @click="cancelPicking">Cancel</button>
+        </p>
 
         <button class="primary-button" type="button" :disabled="!ready" @click="confirmLocation">
           Confirm Location
         </button>
       </template>
 
-      <template v-else> <!-- step 2: destination search -->
+      <template v-else> <!-- destination search -->
         <div class="sheet-header">
           <h2>Enter Destination</h2>
           <span class="building-tag">in</span>
         </div>
         <p class="sheet-hint">
-          Starting from your pinned location.
-          <button class="link-button" type="button" @click="changeLocation">Change</button>
+          <template v-if="manualLocation">
+            Starting from the location you set.
+            <button v-if="locationFix" class="link-button" type="button" @click="useLiveLocation">Use live location</button>
+          </template>
+          <template v-else-if="locationFix">Starting from your current location.</template>
+          <template v-else>Finding your location… or set it with the 📍 button.</template>
         </p>
 
         <form class="destination-form" @submit.prevent="findRoute"> <!-- .prevent stops the browser reloading the page on submit -->
@@ -186,16 +213,30 @@
             v-model="destination"
             class="destination-input"
             type="text"
-            list="room-list"
             placeholder="Where to take you to?"
             enterkeyhint="go"
             autocomplete="off"
             aria-label="Destination"
+            aria-controls="room-suggestions"
+            :aria-expanded="showSuggestions"
+            @focus="suggestionsOpen = true"
+            @input="suggestionsOpen = true"
+            @blur="suggestionsOpen = false"
           > <!-- v-model: the input and `destination` in the script stay in sync both ways -->
-          <!-- Suggestions while typing, from the rooms in the CAD drawing -->
-          <datalist id="room-list">
-            <option v-for="room in namedRooms" :key="room.label" :value="room.label" />
-          </datalist>
+          <!-- Suggestions while typing, from the rooms in the CAD drawing. Not a <datalist>: iOS draws
+               every option in a native popover that freezes the WebView and overflows its own box. -->
+          <ul v-if="showSuggestions" id="room-suggestions" class="suggestions" role="listbox">
+            <li
+              v-for="room in suggestions"
+              :key="`${room.floor}-${room.label}`"
+              class="suggestion"
+              role="option"
+              @mousedown.prevent
+              @click="pickSuggestion(room)"
+            > <!-- mousedown.prevent keeps the input focused, so the tap isn't lost to blur -->
+              {{ room.label }}<span v-if="room.floor !== 1" class="suggestion-floor">Level {{ room.floor }}</span>
+            </li>
+          </ul>
 
           <p v-if="destinationError" class="destination-error">{{ destinationError }}</p>
 
@@ -209,8 +250,11 @@
 </template>
 
 <script setup> // "setup": everything declared here can be used in the template above
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { routeBetween, loadRouteGrid } from '~/utils/route-between' // A* on the device: two map positions -> route points
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { loadRouteGrid } from '~/utils/route-between'
+
+// Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
+const { position: locationFix, startLocation, stopLocation, canRoute, routeTo } = useNavigation()
 
 const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
 const mapImage = ref(null) // the <img> floor plan
@@ -251,18 +295,29 @@ const startPoint = computed(() =>
   rooms.value.find(room => room.number === '1.1' && room.name === 'LOBBY') ?? { x: 0.5, y: 0.5, floor: 1 }
 )
 
-// 'pick' = user is placing their location, 'destination' = searching where to go
-const step = ref('pick')
-const currentLocation = ref(null) // { x, y, floor } the user confirmed, null until then
+// 'destination' = searching where to go, 'pick' = user is placing their location by hand (📍 button)
+const step = ref('destination')
+const manualLocation = ref(null) // { x, y, floor } the user set by hand; wins over the live location until cleared
+const userLocation = computed(() => manualLocation.value ?? locationFix.value) // where the arrow is and routes start; null = unknown
+const following = ref(true) // keep the arrow in the middle of the screen; dragging the map stops it
+
+// Which way the arrow points, in degrees clockwise from the map's up. Comes from sensor fusion
+// (direction of travel); kept when a fix has none (e.g. standing still) so the arrow doesn't snap back to up.
+const markerRotation = ref(0)
+watch(() => locationFix.value?.headingDeg, heading => {
+  if (heading == null) return
+  // Turn the short way round: 350° -> 10° should rotate +20°, not -340° (the CSS transition animates the number)
+  const delta = ((heading - markerRotation.value) % 360 + 540) % 360 - 180
+  markerRotation.value += delta
+})
 const isPanning = ref(false) // finger/mouse is down on the map (lifts the marker)
 const sheetHeight = ref(0) // kept in sync with the sheet so the marker stays centred above it
-const locationFix = ref(null) // { x, y, floor, accuracy } from the location subsystem, accuracy in metres; null = no circle
 
 // How much of the plan's width one metre covers (from the building's surveyed corners)
 const WIDTH_PER_METER = 0.00782
 
 const accuracyRadius = computed(() => // circle radius in screen px (metres -> plan widths -> px)
-  locationFix.value ? locationFix.value.accuracy * WIDTH_PER_METER * imageWidth.value * scale.value : 0
+  locationFix.value ? locationFix.value.accuracyM * WIDTH_PER_METER * imageWidth.value * scale.value : 0
 )
 
 const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0) // map image and rooms both loaded
@@ -353,16 +408,23 @@ function visibleCenter() {
 
 function resetView() {
   if (!ready.value) return
-  const point = currentLocation.value ?? startPoint.value
+  const point = userLocation.value ?? startPoint.value
   const { x, y } = point.floor === mapFloor.value ? point : { x: 0.5, y: 0.5 }
   centerOn(x, y, startScale())
 }
 
-// Compass button: glide back to the user's location (or the lobby while picking)
+// Compass button: glide back to the user's location (or the lobby if it's unknown) and keep following it
 function goToMyLocation() {
   if (!ready.value) return
-  showPoint(currentLocation.value ?? startPoint.value, startScale())
+  if (step.value !== 'pick') following.value = true
+  showPoint(userLocation.value ?? startPoint.value, startScale())
 }
+
+// Keep the arrow centred as live fixes come in, until the user drags the map away
+watch(() => ready.value && userLocation.value, point => {
+  if (!point || !following.value || step.value === 'pick' || isPanning.value) return
+  showPoint(point)
+})
 
 // ---- Floors ----
 
@@ -399,27 +461,47 @@ async function showPoint(point, targetScale = scale.value, whenArrived = null) {
   flyTo(point.x, point.y, targetScale, whenArrived)
 }
 
-// ---- Setting your location ----
+// ---- Setting your location by hand ----
+
+async function startPicking() { // 📍 button
+  stopAnimation()
+  following.value = false
+  step.value = 'pick'
+
+  await nextTick() // wait for the shorter pick sheet to render (Vue updates the page in batches)
+  showPoint(userLocation.value ?? startPoint.value) // bring the current location under the centred marker
+}
 
 async function confirmLocation() { // "Confirm Location" button
   stopAnimation()
   const point = { ...visibleCenter(), floor: mapFloor.value } // read before the sheet changes height
-  currentLocation.value = point
-  step.value = 'destination'
-
-  await nextTick() // wait for the taller destination sheet to render (Vue updates the page in batches)
-  flyTo(point.x, point.y) // glide so the marker sits in the middle of the new visible area
+  manualLocation.value = point
+  clearRoute() // it started from the old location
+  await leavePicking()
 }
 
-async function changeLocation() { // "Change" link in step 2
+async function cancelPicking() { // "Cancel" link, or the 📍 button again
   stopAnimation()
-  selectedRoom.value = null // the destination no longer applies
-  route.value = null // nor does the route
-  destinationError.value = ''
-  step.value = 'pick'
+  await leavePicking()
+}
 
-  await nextTick() // wait for the shorter pick sheet to render
-  showPoint(currentLocation.value ?? startPoint.value) // bring the saved point under the centred marker
+async function leavePicking() {
+  step.value = 'destination'
+  following.value = true
+  await nextTick() // wait for the taller destination sheet to render
+  if (userLocation.value) showPoint(userLocation.value) // glide so the dot sits in the middle of the new visible area
+}
+
+function useLiveLocation() { // "Use live location" link: drop the hand-set location
+  manualLocation.value = null
+  clearRoute()
+  goToMyLocation()
+}
+
+function clearRoute() {
+  selectedRoom.value = null
+  route.value = null
+  destinationError.value = ''
 }
 
 // ---- Smooth movement ----
@@ -541,6 +623,7 @@ function pinchInfo() {
 
 function onPointerDown(event) { // finger or mouse pressed on the map
   stopAnimation()
+  following.value = false // the user is looking around; the compass button brings the dot back
   // Close the keyboard when the user goes back to the map
   document.activeElement?.blur()
 
@@ -620,6 +703,32 @@ const namedRooms = computed(() =>
     .map(room => ({ ...room, label: `${room.name} (${room.number})` }))
 )
 
+const suggestionsOpen = ref(false) // true while the input is focused, until a suggestion is picked
+const MAX_SUGGESTIONS = 30
+
+// Rooms whose label contains what's typed, ones that start with it first
+const suggestions = computed(() => {
+  const query = destination.value.trim().toLowerCase()
+  if (!query) return namedRooms.value.slice(0, MAX_SUGGESTIONS)
+  const starts = []
+  const contains = []
+  for (const room of namedRooms.value) {
+    const label = room.label.toLowerCase()
+    if (label === query) return [] // already a full label: nothing left to suggest
+    if (label.startsWith(query) || room.number.startsWith(query)) starts.push(room)
+    else if (label.includes(query)) contains.push(room)
+  }
+  return starts.concat(contains).slice(0, MAX_SUGGESTIONS)
+})
+
+const showSuggestions = computed(() => suggestionsOpen.value && suggestions.value.length > 0)
+
+function pickSuggestion(room) {
+  destination.value = room.label
+  destinationError.value = ''
+  suggestionsOpen.value = false
+}
+
 async function findRoute() { // "Find Route" button: find the room, work out the route, glide to it, then drop the pin
   const query = destination.value.trim().toLowerCase()
   // A full label like "LOBBY (1.1)" is one room. Numbers and names alone can be shared
@@ -645,16 +754,21 @@ async function findRoute() { // "Find Route" button: find the room, work out the
   selectedRoom.value = null // old pin shrinks away while the map glides
   route.value = null // old route goes away while the new one is found
 
-  const start = currentLocation.value
-  if (start.floor !== 1 || room.floor !== 1) { // the route grid (SPN.txt) only covers level 1
+  const start = userLocation.value && { x: userLocation.value.x, y: userLocation.value.y, floor: userLocation.value.floor }
+  if (!start) {
+    destinationError.value = "We don't know where you are yet. Set your location with the 📍 button."
+    return showPoint(room, startScale(), () => { selectedRoom.value = room })
+  }
+  following.value = false // the view moves to the route instead of the dot
+  if (!canRoute(start, room)) { // the route grid (SPN.txt) only covers level 1
     destinationError.value = 'Routes are only available on level 1 for now.'
     return showPoint(room, startScale(), () => { selectedRoom.value = room })
   }
 
   routeLoading.value = true
   try {
-    const points = await routeBetween(start, room) // A* runs right here on the phone
-    if (step.value !== 'destination') return // "Change" was tapped while waiting
+    const points = await routeTo(start, room) // A* runs right here on the phone
+    if (step.value !== 'destination') return // the 📍 button was tapped while waiting
     route.value = { points } // setting this draws the line
   } catch (err) {
     console.error(err)
@@ -716,12 +830,14 @@ onMounted(() => { // runs once the page is on screen in the browser
 
   loadRooms()
   loadRouteGrid().catch(() => {}) // start loading the grid now so Find Route is quick; errors show when it's pressed
+  startLocation() // BLE positioning; if it's unavailable the user just places themselves by hand
   window.addEventListener('resize', onResize)
   sheetObserver.observe(sheet.value)
 })
 
 onBeforeUnmount(() => { // runs when leaving the page: stop animations and listeners so nothing keeps running
   stopAnimation()
+  stopLocation()
   window.removeEventListener('resize', onResize)
   sheetObserver.disconnect()
 })
@@ -811,7 +927,7 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   opacity: 0;
 }
 
-/* Confirmed location: just the arrow, centred on the point */
+/* You are here: the app's arrow, centred on the point and turned to the heading */
 .location-marker {
   --marker-size: 28px; /* same as the AppLogo size */
 
@@ -824,6 +940,10 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   margin-top: calc(var(--marker-size) / -2);
   display: grid;
   pointer-events: none;
+}
+
+.location-marker svg {
+  transition: transform 0.3s ease-out; /* turns smoothly between heading updates */
 }
 
 /* Green push-pin while picking (two classes so they beat the shared .map-pin rules below) */
@@ -1022,6 +1142,11 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   gap: 12px;
 }
 
+.map-controls.left {
+  right: auto;
+  left: 16px;
+}
+
 .control {
   width: 44px;
   height: 44px;
@@ -1035,8 +1160,13 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   cursor: pointer;
 }
 
-.control:active {
+.control:active,
+.control.active {
   background: var(--color-primary-soft);
+}
+
+.control:disabled {
+  cursor: default;
 }
 
 .control svg {
@@ -1053,9 +1183,9 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   position: absolute;
   top: 0;
   left: 0;
-  border: 2px solid var(--color-primary);
+  border: 2px solid var(--color-location);
   border-radius: 50%;
-  background: var(--color-primary-soft); /* see-through, so the rooms show under it */
+  background: var(--color-location-soft); /* see-through, so the rooms show under it */
   pointer-events: none; /* drags go to the map */
 }
 
@@ -1128,6 +1258,38 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 
 .destination-input::placeholder {
   color: var(--color-text-muted);
+}
+
+.suggestions {
+  max-height: 200px;
+  margin: -10px 0 16px;
+  padding: 4px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* scrolling the list doesn't drag the page */
+  -webkit-overflow-scrolling: touch;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.suggestion {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.suggestion:active {
+  background: var(--color-border);
+}
+
+.suggestion-floor {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
 }
 
 .destination-error {

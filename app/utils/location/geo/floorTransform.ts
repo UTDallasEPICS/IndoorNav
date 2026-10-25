@@ -6,7 +6,7 @@ import type { Enu, FloorTransform, PlanPoint } from '../types'
  * Plan "right" (+x) and "down" (+y) as unit vectors in east/north. With rotationDeg = 0, right is east and
  * down is south. A positive rotation turns the plan clockwise as seen on a north-up map.
  */
-function planAxes(rotationDeg: number) {
+export function planAxes(rotationDeg: number) {
   const t = (rotationDeg * Math.PI) / 180
   const cos = Math.cos(t)
   const sin = Math.sin(t)
