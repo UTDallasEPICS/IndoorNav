@@ -12,8 +12,8 @@ export type { MapPosition }
 
 type MapPoint = { x: number, y: number, floor: number } // fractions (0–1) of that floor's map, like the rooms' x/y
 
-/** Floors with a route grid (only public/data/SPN.txt, level 1, for now) */
-const ROUTABLE_FLOORS = [1]
+/** Floors with a route grid (public/data/SPN.txt and SPN-level2.txt) */
+const ROUTABLE_FLOORS = [1, 2]
 
 /** A position older than this is dropped, so the dot doesn't sit still after we stop hearing beacons */
 const STALE_AFTER_MS = 10_000
@@ -88,8 +88,8 @@ export function useNavigation() {
 
   /** Route as map positions, start to destination. Throws an Error with a message to show the user. */
   async function routeTo(start: MapPoint, destination: MapPoint) {
-    if (!canRoute(start, destination)) throw new Error('Routes are only available on level 1 for now.')
-    return routeBetween(start, destination)
+    if (!canRoute(start, destination)) throw new Error("Routes between floors aren't available yet.")
+    return routeBetween(start, destination, start.floor)
   }
 
   return {

@@ -52,7 +52,7 @@
 
       <!-- Route line from your location to the destination. Same size and position as the floor plan. -->
       <svg
-        v-if="ready && route && mapFloor === 1"
+        v-if="ready && route && mapFloor === route.floor"
         class="route-line"
         viewBox="0 0 1 1"
         preserveAspectRatio="none"
@@ -688,7 +688,7 @@ function onPointerUp(event) { // finger or mouse lifted: also detects double-tap
 const destination = ref('') // the search box text (v-model in the template)
 const destinationError = ref('')
 const selectedRoom = ref(null) // the room the pin is shown on (null = no pin)
-const route = ref(null) // { points: [{ x, y }, ...] } in map fractions, start to destination; null = no line
+const route = ref(null) // { points: [{ x, y }, ...], floor } in map fractions, start to destination; null = no line
 const routeLoading = ref(false) // true while the route is being found (disables the button)
 const ROUTE_PADDING = 40 // px kept around the route when zooming to fit it
 
@@ -760,8 +760,8 @@ async function findRoute() { // "Find Route" button: find the room, work out the
     return showPoint(room, startScale(), () => { selectedRoom.value = room })
   }
   following.value = false // the view moves to the route instead of the dot
-  if (!canRoute(start, room)) { // the route grid (SPN.txt) only covers level 1
-    destinationError.value = 'Routes are only available on level 1 for now.'
+  if (!canRoute(start, room)) { // each floor has its own grid, so start and destination must be on the same floor
+    destinationError.value = "Routes between floors aren't available yet."
     return showPoint(room, startScale(), () => { selectedRoom.value = room })
   }
 
@@ -769,7 +769,7 @@ async function findRoute() { // "Find Route" button: find the room, work out the
   try {
     const points = await routeTo(start, room) // A* runs right here on the phone
     if (step.value !== 'destination') return // the 📍 button was tapped while waiting
-    route.value = { points } // setting this draws the line
+    route.value = { points, floor: room.floor } // setting this draws the line (on the room's floor)
   } catch (err) {
     console.error(err)
     destinationError.value = err.message || 'Something went wrong finding the route.'
@@ -777,7 +777,7 @@ async function findRoute() { // "Find Route" button: find the room, work out the
     routeLoading.value = false
   }
 
-  await switchFloor(1) // first, so the zoom-to-fit below uses level 1's map size
+  await switchFloor(room.floor) // first, so the zoom-to-fit below uses the destination floor's map size
   const view = route.value ? routeView(route.value.points) : { x: room.x, y: room.y, scale: startScale() } // no route: just show the room
   flyTo(view.x, view.y, view.scale, () => {
     selectedRoom.value = room // arrived: the new pin bursts in on screen
@@ -829,7 +829,7 @@ onMounted(() => { // runs once the page is on screen in the browser
   if (mapImage.value?.complete && mapImage.value.naturalWidth) onImageLoad()
 
   loadRooms()
-  loadRouteGrid().catch(() => {}) // start loading the grid now so Find Route is quick; errors show when it's pressed
+  FLOORS.forEach(option => loadRouteGrid(option.level).catch(() => {})) // start loading each floor's grid now so Find Route is quick; errors show when it's pressed
   startLocation() // BLE positioning; if it's unavailable the user just places themselves by hand
   window.addEventListener('resize', onResize)
   sheetObserver.observe(sheet.value)
