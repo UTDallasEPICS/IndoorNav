@@ -122,7 +122,9 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
   `phoneHeightM`, and the RSSI filter (`medianWindow`, `processNoise`, `measurementNoise`).
 - Per beacon: `txPower` (RSSI at 1 m) and `pathLossExponent` come from the survey fit (see **Beacon data**).
   Re-survey to recalibrate; beacons without a fit use `DEFAULT_BEACON_REGISTRY_OPTIONS`.
-- `FusionEngine` options: Kalman `accelerationNoise`, indoor/outdoor `switchAfterMs`, `gpsGoodAccuracyM`.
+- `FusionEngine` options: Kalman `accelerationNoise`, indoor/outdoor `switchAfterMs`, `gpsGoodAccuracyM`,
+  `maxDeadReckoningMs` (5 s: how long steps/compass alone keep moving the dot after the last BLE fix; after that
+  nothing is emitted, so the map's 10 s stale check can clear the dot).
 - `StepKalman` (`fusion/stepKalman.ts`): `stationaryMeasurementScale` and `stationaryNoise` (how hard the dot holds
   still while you stand), `movingNoise`, `gateChi2` / `relocalizeAfter` (outlier rejection).
 - `PdrProvider` options: step `thresholdMs2` / `weinbergK`, `headingSmoothingMs`, `defaultHeadingAccuracyDeg`.

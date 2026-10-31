@@ -129,6 +129,12 @@ export class StepKalman implements PositionFilter {
     this.pnn = pnn
   }
 
+  /** Advances to `timestamp` without a step or fix, so the uncertainty keeps growing between them. */
+  predict(timestamp: number) {
+    if (this.lastTimestamp === null) return
+    this.predictTo(timestamp)
+  }
+
   state() {
     if (this.lastTimestamp === null) return null
     return { e: this.e, n: this.n, ve: 0, vn: 0, accuracyM: Math.sqrt(this.pee + this.pnn) }

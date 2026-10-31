@@ -25,6 +25,8 @@ export interface FusionOptions {
   minSpeedForHeading: number
   /** Fall back to the constant-velocity filter once motion sensors have been silent this long (ms) */
   motionTimeoutMs: number
+  /** Stop moving the dot on steps alone once no absolute fix has been used for this long (ms), so it can go stale */
+  maxDeadReckoningMs: number
 }
 
 export const DEFAULT_FUSION: FusionOptions = {
@@ -32,7 +34,8 @@ export const DEFAULT_FUSION: FusionOptions = {
   stepKalman: DEFAULT_STEP_KALMAN,
   indoorOutdoor: DEFAULT_INDOOR_OUTDOOR,
   minSpeedForHeading: 0.5,
-  motionTimeoutMs: 2000
+  motionTimeoutMs: 2000,
+  maxDeadReckoningMs: 5000
 }
 
 export class FusionEngine {
@@ -41,6 +44,8 @@ export class FusionEngine {
   private filter: ConstantVelocityKalman
   private stepFilter: StepKalman
   private motion: MotionState | null = null
+  /** Time of the last BLE/GPS fix the filters used */
+  private lastAbsoluteFixTime: number | null = null
   private detector: IndoorOutdoorDetector
   private fixes = new Emitter<LocationFix>()
   private events = new Emitter<LocationEvent>()
@@ -83,6 +88,7 @@ export class FusionEngine {
     if (!useFix) return
 
     this.filter.update(fix.enu.e, fix.enu.n, fix.accuracyM, fix.timestamp)
+    this.lastAbsoluteFixTime = fix.timestamp
     if (this.motionLive(fix.timestamp)) {
       const cv = this.filter.state()!
       if (!this.stepFilter.state()) {
@@ -100,7 +106,7 @@ export class FusionEngine {
   /** One PDR step: moves the estimate along the step's heading. Ignored until an absolute fix has placed us. */
   ingestStep(step: PdrStep) {
     this.motion = { timestamp: step.timestamp, isMoving: true, headingDeg: step.headingDeg ?? this.motion?.headingDeg ?? null, headingAccuracyDeg: step.headingAccuracyDeg }
-    if (!this.stepFilter.state()) return
+    if (!this.deadReckoning(step.timestamp)) return
     this.stepFilter.step(step.lengthM, step.headingDeg, step.headingAccuracyDeg, step.timestamp)
     this.emitFix(step.timestamp)
   }
@@ -109,11 +115,24 @@ export class FusionEngine {
   ingestMotion(state: MotionState) {
     this.motion = state
     this.stepFilter.setMoving(state.isMoving)
-    if (this.stepFilter.state()) this.emitFix(state.timestamp)
+    if (!this.deadReckoning(state.timestamp)) return
+    this.stepFilter.predict(state.timestamp) // the reported accuracy grows while only motion data arrives
+    this.emitFix(state.timestamp)
   }
 
   private motionLive(timestamp: number) {
     return this.motion !== null && timestamp - this.motion.timestamp <= this.options.motionTimeoutMs
+  }
+
+  /**
+   * Whether steps and compass may still move the dot: the step filter has been placed and an absolute fix was
+   * used recently. Otherwise drop the step filter, so nothing is emitted until BLE places us again.
+   */
+  private deadReckoning(timestamp: number) {
+    if (!this.stepFilter.state()) return false
+    if (this.lastAbsoluteFixTime !== null && timestamp - this.lastAbsoluteFixTime <= this.options.maxDeadReckoningMs) return true
+    this.stepFilter.reset()
+    return false
   }
 
   private emitFix(timestamp: number, providerHeadingDeg?: number) {
@@ -148,6 +167,7 @@ export class FusionEngine {
     this.filter.reset()
     this.stepFilter.reset()
     this.motion = null
+    this.lastAbsoluteFixTime = null
     this.detector.reset()
     this.isIndoor = null
     this.buildingId = null

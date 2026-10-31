@@ -261,3 +261,41 @@ describe('FusionEngine with motion sensors', () => {
     expect(fixes.at(-1)!.enu.e).toBeGreaterThan(134)
   })
 })
+
+describe('FusionEngine dead reckoning without BLE', () => {
+  function setup() {
+    const engine = new FusionEngine(sampleVenue)
+    const fixes: LocationFix[] = []
+    engine.onFix((f) => fixes.push(f))
+    engine.ingestMotion({ timestamp: 0, isMoving: false, headingDeg: 90, headingAccuracyDeg: 10 })
+    engine.ingest(bleFix(130, 65, 0))
+    return { engine, fixes }
+  }
+
+  it('stops emitting compass-only positions once BLE goes quiet, so the dot can go stale', () => {
+    const { engine, fixes } = setup()
+    for (let t = 250; t <= 60_000; t += 250) engine.ingestMotion({ timestamp: t, isMoving: false, headingDeg: 90, headingAccuracyDeg: 10 })
+    expect(fixes.at(-1)!.timestamp).toBeLessThanOrEqual(5000)
+  })
+
+  it('stops moving the dot on steps alone once BLE goes quiet', () => {
+    const { engine, fixes } = setup()
+    for (let t = 500; t <= 30_000; t += 500) engine.ingestStep({ timestamp: t, lengthM: 0.7, headingDeg: 90, headingAccuracyDeg: 10 })
+    expect(fixes.at(-1)!.timestamp).toBeLessThanOrEqual(5000)
+  })
+
+  it('grows the reported accuracy while only motion data arrives', () => {
+    const { engine, fixes } = setup()
+    const first = fixes.at(-1)!.accuracyM
+    for (let t = 250; t <= 4000; t += 250) engine.ingestMotion({ timestamp: t, isMoving: true, headingDeg: 90, headingAccuracyDeg: 10 })
+    expect(fixes.at(-1)!.accuracyM).toBeGreaterThan(first)
+  })
+
+  it('picks up again with the next BLE fix', () => {
+    const { engine, fixes } = setup()
+    for (let t = 250; t <= 20_000; t += 250) engine.ingestMotion({ timestamp: t, isMoving: false, headingDeg: 90, headingAccuracyDeg: 10 })
+    engine.ingest(bleFix(140, 65, 20_100))
+    engine.ingestStep({ timestamp: 20_500, lengthM: 0.7, headingDeg: 90, headingAccuracyDeg: 10 })
+    expect(fixes.at(-1)!.timestamp).toBe(20_500)
+  })
+})
