@@ -14,9 +14,10 @@ export const SPN1_LEVEL1 = {
   // `geo` overrides the export's georeference (where the survey's local frame sits on Earth).
   surveys: [
     {
-      name: 'spn-level1-20261029-1613',
-      csv_path: '/data/surveys/spn-level1-beacons-20261029-1613.csv',
-      floor_path: '/data/surveys/spn-level1-floor-20261029-1613.json',
+      // vBLE beams grouped per AP (group_virtual_beacons)
+      name: 'spn-level1-20261030-2055',
+      csv_path: '/data/surveys/spn-level1-beacons-20261030-2055.csv',
+      floor_path: '/data/surveys/spn-level1-floor-20261030-2055.json',
       // The export's georeference is wrong (unchanged since the 2026-10-21 export, same floorplan image and frame): it gives the image's bottom-left corner (blank paper) the lat/lon of
       // the UT Design 1.2 corner, with image-right pointing east. Image-right is actually south, as on our map.
       // Re-anchored by matching 58 room labels between the survey's floorplan image and spn-level1.svg, through

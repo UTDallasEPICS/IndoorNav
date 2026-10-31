@@ -6,7 +6,7 @@ import type { BeaconRegistryEntry, VenueConfig } from './types'
 
 /** One beacon row as `listBeacons` returns it */
 export interface StoredBeacon {
-  /** Eddystone namespace and instance, lowercase hex */
+  /** Eddystone namespace and instance, lowercase hex (`*` in the instance: any vBLE beam of one AP) */
   namespace: string
   instance: string
   /** Building name in the database, e.g. "SPN1" (matched to `Building.id` ignoring case) */

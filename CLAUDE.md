@@ -150,6 +150,8 @@ Decision drivers to respect:
     Not yet verified on a device; level 2 not surveyed.
   - 2026-10-29: seed replaced with the 2026-10-29 level 1 survey: 450 IDs, 152 good/fair used (45 good, up from 7).
     Same georef override; height offset now 1.5 m.
+  - 2026-10-30: seed replaced with the 2026-10-30 level 1 export with vBLE beams grouped per AP: 71 APs, 37 good/fair
+    used. Scans match any beam to its AP (`resolveBeaconId`). Level 2 export received but not imported (no georef fit).
 - [ ] Get written non-objection from OIT for passive BLE reception. *Due Oct 16*
 - [ ] Confirm a Capacitor BLE plugin reads advertisements on current iOS **and** Android devices.
 - [ ] BLE trilateration prototype that outputs coordinates.

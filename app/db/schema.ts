@@ -68,7 +68,7 @@ export const beacons = sqliteTable('beacons', {
   floor_id: integer('floor_id').references(() => floors.id).notNull(),
   survey_id: integer('survey_id').references(() => beacon_surveys.id), // survey that last set this row
   namespace: text('namespace').notNull(), // 10-byte Eddystone namespace, lowercase hex
-  instance: text('instance').notNull(),   // 6-byte Eddystone instance, lowercase hex
+  instance: text('instance').notNull(),   // 6-byte Eddystone instance, lowercase hex; `*` stands for a vBLE beam digit (one row per AP)
   label: text('label'), // e.g. the AP's name from OIT, to help find it on site
 
   // manual (placed by hand) or the fit quality: good, fair, ambiguous, poor, insufficient
@@ -105,6 +105,6 @@ export const beacons = sqliteTable('beacons', {
   updated_at: text('updated_at'), // when the survey last changed this beacon
   notes: text('notes'),
 }, (t) => [
-  // a scanned frame is matched to its beacon by namespace + instance
+  // a scanned frame is matched to its beacon by namespace + instance (with `*` matching any digit)
   unique().on(t.namespace, t.instance),
 ])

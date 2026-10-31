@@ -57,6 +57,11 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
 - `useNavigation` reads them with `listBeacons(db)` and passes them through `withStoredBeacons(spnVenue, rows)`
   (`beaconRegistry.ts`), which converts lat/lon to ENU and keeps only trusted beacons: `manual`, `good`, `fair`.
   `ambiguous`, `poor` and `insufficient` rows are stored but not used (`BeaconRegistryOptions.statuses`).
+- **vBLE:** each Mist AP sends one Eddystone instance per beam of its vBLE array. Surveys exported with
+  `group_virtual_beacons` store one row per AP, with the beam digit of the instance replaced by `*`
+  (`41021*e40000`). `indexVenue(...).resolveBeaconId` maps every scanned beam onto that row, so an AP's beams feed
+  one RSSI filter and count once in trilateration. Don't import an ungrouped export: each beam would be placed as
+  its own beacon a few meters from the AP.
 - Each beacon's `txPower` / `pathLossExponent` are the survey's fitted values. Its mounting height is
   `floorZ + phoneHeightM + height_offset_m`, the beacon-to-phone height the survey's fit assumed.
 - **Adding a survey:** copy the export's `*_beacons_*.csv` and `*_floor_*.json` into `public/data/surveys/` as
@@ -64,7 +69,7 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
   (oldest first). Devices import it on next launch. A later survey overwrites a beacon's data, but a survey that
   couldn't place a beacon doesn't erase an earlier position. To replace a survey, swap it out of `surveys`: on next launch
   the seed deletes surveys no longer listed and the beacons they last set (`removeStaleSurveys`).
-- **Check the export's georeference** before adding it. The level 1 exports (2026-10-21, 2026-10-29) have it wrong (image-right
+- **Check the export's georeference** before adding it. The level 1 exports (2026-10-21 through 2026-10-30) have it wrong (image-right
   set to east; it's south), so `seed.ts` overrides it with `geo`, fitted from room labels matched between the
   survey's floorplan image and the map SVG. `beacons.test.ts` fails if surveyed beacons fall off the map.
 
