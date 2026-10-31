@@ -18,10 +18,15 @@ const ROUTABLE_FLOORS = [1]
 /** A position older than this is dropped, so the dot doesn't sit still after we stop hearing beacons */
 const STALE_AFTER_MS = 10_000
 
+/** Scanning this long without a position (beacons gone, or never found) counts as lost: the map asks the user to set it */
+const LOST_AFTER_MS = 60_000
+
 // Shared by every component that calls useNavigation(), so there's only one BLE scan
 const position = ref<MapPosition | null>(null)
 const locationStatus = ref<ProviderStatus['state']>('idle')
 const locationMessage = ref('')
+const locationLost = ref(false)
+let lastHeardAt = 0 // when we last had a position, or when scanning started
 let service: LocationService | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
 let users = 0
@@ -46,12 +51,19 @@ export function useNavigation() {
     created.onStatus(status => {
       // Only BLE decides whether there's a live location; without motion sensors it still works, just less smoothly
       if (status.provider !== 'ble') return
+      if (status.state === 'running' && locationStatus.value !== 'running') lastHeardAt = Date.now()
       locationStatus.value = status.state
       locationMessage.value = status.message ?? ''
     })
-    created.subscribePosition(p => { position.value = p })
+    created.subscribePosition(p => {
+      position.value = p
+      lastHeardAt = Date.now()
+      locationLost.value = false
+    })
     staleTimer = setInterval(() => {
       if (position.value && Date.now() - position.value.timestamp > STALE_AFTER_MS) position.value = null
+      // Only while BLE is scanning: if it's unavailable or denied, the sheet already says so
+      locationLost.value = locationStatus.value === 'running' && Date.now() - lastHeardAt > LOST_AFTER_MS
     }, 1000)
 
     // Beacon positions and path-loss fits come from the on-device database (the bSLAM survey import)
@@ -83,6 +95,7 @@ export function useNavigation() {
     if (staleTimer) clearInterval(staleTimer)
     staleTimer = null
     position.value = null
+    locationLost.value = false
     locationStatus.value = 'idle'
     await stopping.stop()
   }
@@ -101,6 +114,7 @@ export function useNavigation() {
     position: readonly(position), // live MapPosition { x, y, floor, accuracyM, timestamp }, or null
     locationStatus: readonly(locationStatus),
     locationMessage: readonly(locationMessage),
+    locationLost: readonly(locationLost), // true after LOST_AFTER_MS of scanning with no position
     startLocation,
     stopLocation,
     canRoute,
