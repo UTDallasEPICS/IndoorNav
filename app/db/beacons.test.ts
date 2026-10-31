@@ -5,13 +5,13 @@ import { toBeaconRegistry, type StoredBeacon } from '../utils/location/beaconReg
 import { enuToPlan } from '../utils/location/geo/floorTransform'
 import { wgs84ToEnu } from '../utils/location/geo/wgs84'
 import { spnVenue } from '../utils/location/venues/spn'
-import { importBeaconSurvey, listBeacons, parseBeaconSurvey, parseCsv, surveyLocalToWgs84, type SurveyFloorMeta } from './beacons'
+import { importBeaconSurvey, listBeacons, parseBeaconSurvey, parseCsv, removeStaleSurveys, surveyLocalToWgs84, type SurveyFloorMeta } from './beacons'
 import * as schema from './schema'
 import { SPN1_LEVEL1 } from './seed'
 
 const SURVEY = 'public/data/surveys/spn-level1'
-const csv = readFileSync(`${SURVEY}-beacons-20261021-1103.csv`, 'utf8')
-const exported: SurveyFloorMeta = JSON.parse(readFileSync(`${SURVEY}-floor-20261021-1103.json`, 'utf8'))
+const csv = readFileSync(`${SURVEY}-beacons-20261029-1613.csv`, 'utf8')
+const exported: SurveyFloorMeta = JSON.parse(readFileSync(`${SURVEY}-floor-20261029-1613.json`, 'utf8'))
 // What the app imports: the export with its georeference corrected (see seed.ts)
 const floor: SurveyFloorMeta = { ...exported, geo: SPN1_LEVEL1.surveys[0]!.geo }
 
@@ -21,24 +21,24 @@ describe('parseCsv', () => {
   })
 })
 
-describe('parseBeaconSurvey (SPN1 level 1, 2026-10-21)', () => {
+describe('parseBeaconSurvey (SPN1 level 1, 2026-10-29)', () => {
   const { beacons, skipped } = parseBeaconSurvey(csv, floor)
 
   it('reads every Eddystone-UID row, with lowercase IDs', () => {
-    expect(beacons).toHaveLength(657)
+    expect(beacons).toHaveLength(450)
     expect(skipped).toBe(0)
     expect(beacons.every((b) => b.namespace === 'a023919cd30a4e79bbd9' && /^[0-9a-f]{12}$/.test(b.instance))).toBe(true)
-    expect(new Set(beacons.map((b) => b.instance)).size).toBe(657)
+    expect(new Set(beacons.map((b) => b.instance)).size).toBe(450)
   })
 
   it('keeps the fit for placed beacons and leaves unplaced ones without a position', () => {
     const placed = beacons.filter((b) => b.position_source === 'auto')
-    expect(placed.length).toBe(312)
+    expect(placed.length).toBe(218)
     expect(placed.every((b) => b.latitude !== null && b.tx_power_dbm !== null && b.path_loss_exponent !== null)).toBe(true)
     expect(beacons.filter((b) => b.status === 'insufficient').every((b) => b.latitude === null)).toBe(true)
 
-    const good = beacons.find((b) => b.instance === '410268fc0000')!
-    expect(good).toMatchObject({ status: 'good', tx_power_dbm: -47.8, path_loss_exponent: 2.96, sigma_major_m: 1.32 })
+    const good = beacons.find((b) => b.instance === '4102b6e40000')!
+    expect(good).toMatchObject({ status: 'good', tx_power_dbm: -50, path_loss_exponent: 2.78, sigma_major_m: 0.64 })
   })
 
   it('with the export\'s own georeference, converts the local frame to the lat/lon it exported', () => {
@@ -54,7 +54,7 @@ describe('parseBeaconSurvey (SPN1 level 1, 2026-10-21)', () => {
 
   it('stores ambiguous beacons\' mirror-image solution as lat/lon', () => {
     const ambiguous = beacons.filter((b) => b.status === 'ambiguous')
-    expect(ambiguous).toHaveLength(7)
+    expect(ambiguous).toHaveLength(9)
     expect(ambiguous.every((b) => b.alternate_latitude !== null && b.alternate_longitude !== null)).toBe(true)
   })
 
@@ -79,13 +79,13 @@ describe('toBeaconRegistry', () => {
   const registry = toBeaconRegistry(stored, spnVenue)
 
   it('keeps only trusted, placed beacons, keyed like scanned Eddystone frames', () => {
-    expect(registry).toHaveLength(197) // 7 good + 190 fair
+    expect(registry).toHaveLength(152) // 45 good + 107 fair
     expect(registry[0]!.id).toMatch(/^a023919cd30a4e79bbd9:[0-9a-f]{12}$/)
     expect(registry.every((b) => b.floorId === 'spn1-l1')).toBe(true)
   })
 
   it('mounts beacons at the survey\'s height above the phone', () => {
-    expect(registry.every((b) => Math.abs(b.enu.u - (1.2 + 2)) < 1e-9)).toBe(true)
+    expect(registry.every((b) => Math.abs(b.enu.u - (1.2 + 1.5)) < 1e-9)).toBe(true)
   })
 
   it('places the beacons on the SPN1 level 1 map', () => {
@@ -123,15 +123,15 @@ describe('importBeaconSurvey (in SQLite)', () => {
 
   it('imports once, and lists beacons for the location module', async () => {
     const db = await openDb()
-    expect(await importBeaconSurvey(db, { floorId: 1, name: 's1', csv, floor })).toEqual({ imported: 657, skipped: 0 })
+    expect(await importBeaconSurvey(db, { floorId: 1, name: 's1', csv, floor })).toEqual({ imported: 450, skipped: 0 })
     expect(await importBeaconSurvey(db, { floorId: 1, name: 's1', csv, floor })).toEqual({ imported: 0, skipped: 0 })
 
     const stored = await listBeacons(db)
-    expect(stored).toHaveLength(657)
-    const good = stored.find((b) => b.instance === '410268fc0000')!
-    expect(good).toMatchObject({ building: 'SPN1', level: 1, status: 'good', txPowerDbm: -47.8 })
-    expect(good.heightOffsetM).toBeCloseTo(2)
-    expect(toBeaconRegistry(stored, spnVenue)).toHaveLength(197)
+    expect(stored).toHaveLength(450)
+    const good = stored.find((b) => b.instance === '4102b6e40000')!
+    expect(good).toMatchObject({ building: 'SPN1', level: 1, status: 'good', txPowerDbm: -50 })
+    expect(good.heightOffsetM).toBeCloseTo(1.5)
+    expect(toBeaconRegistry(stored, spnVenue)).toHaveLength(152)
   })
 
   it('lets a later survey update beacons without erasing positions it couldn\'t find', async () => {
@@ -143,12 +143,25 @@ describe('importBeaconSurvey (in SQLite)', () => {
     // A placed beacon now reported as insufficient (status, quality, position_source, position cleared), and an
     // insufficient one now placed (borrowing a placed row's fit)
     const later = header
-      + row('410268FC0000').split(',').map((f, i) => (i === 11 || i === 12 ? 'insufficient' : i === 13 ? 'none' : i >= 14 && i <= 21 ? '' : f)).join(',') + '\n'
-      + row('410210E40000').replaceAll('410210E40000', '410201E80000') + '\n'
+      + row('4102B6E40000').split(',').map((f, i) => (i === 11 || i === 12 ? 'insufficient' : i === 13 ? 'none' : i >= 14 && i <= 21 ? '' : f)).join(',') + '\n'
+      + row('410211E40000').replaceAll('410211E40000', '410201E80000') + '\n'
     await importBeaconSurvey(db, { floorId: 1, name: 's2', csv: later, floor })
 
     const byInstance = new Map((await listBeacons(db)).map((b) => [b.instance, b]))
-    expect(byInstance.get('410268fc0000')).toMatchObject({ status: 'good' })
-    expect(byInstance.get('410201e80000')).toMatchObject({ status: 'fair', txPowerDbm: -52.6 })
+    expect(byInstance.get('4102b6e40000')).toMatchObject({ status: 'good' })
+    expect(byInstance.get('410201e80000')).toMatchObject({ status: 'fair', txPowerDbm: -62.7 })
+  })
+
+  it('removes surveys no longer listed, with the beacons they last set', async () => {
+    const db = await openDb()
+    await importBeaconSurvey(db, { floorId: 1, name: 'old', csv, floor })
+    const header = csv.slice(0, csv.indexOf('\n') + 1)
+    const row = (instance: string) => csv.split('\n').find((line) => line.includes(`:${instance},`))!
+    await importBeaconSurvey(db, { floorId: 1, name: 'new', csv: header + row('4102B6E40000') + '\n', floor })
+
+    expect(await removeStaleSurveys(db, 1, ['new'])).toBe(1)
+    expect(await removeStaleSurveys(db, 1, ['new'])).toBe(0)
+    expect((await listBeacons(db)).map((b) => b.instance)).toEqual(['4102b6e40000'])
+    expect(await db.select().from(schema.beacon_surveys)).toHaveLength(1)
   })
 })

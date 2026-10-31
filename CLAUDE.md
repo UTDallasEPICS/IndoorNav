@@ -148,6 +148,8 @@ Decision drivers to respect:
   - 2026-10-23: level 1 bSLAM survey (2026-10-21) imported into the on-device DB (`app/db/beacons.ts`, WGS84):
     657 Eddystone-UID IDs, 197 placed good/fair and used for positioning. Survey georef corrected in `app/db/seed.ts`.
     Not yet verified on a device; level 2 not surveyed.
+  - 2026-10-29: seed replaced with the 2026-10-29 level 1 survey: 450 IDs, 152 good/fair used (45 good, up from 7).
+    Same georef override; height offset now 1.5 m.
 - [ ] Get written non-objection from OIT for passive BLE reception. *Due Oct 16*
 - [ ] Confirm a Capacitor BLE plugin reads advertisements on current iOS **and** Android devices.
 - [ ] BLE trilateration prototype that outputs coordinates.

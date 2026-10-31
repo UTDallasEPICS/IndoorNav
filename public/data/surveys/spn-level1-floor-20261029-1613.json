@@ -6,7 +6,7 @@
   "eddystone_filters" : [
     "A023919CD30A4E79BBD9"
   ],
-  "exported_at" : "2026-10-21T16:03:06.083Z",
+  "exported_at" : "2026-10-29T21:13:07.280Z",
   "floor" : "1",
   "floorplan_image" : "5CE09E62-FB8A-4717-B912-6175123DD649-1791927762.png",
   "geo" : {
@@ -23,7 +23,7 @@
   ],
   "path_loss" : {
     "fixed_exponent" : null,
-    "height_offset_m" : 2.0000000000000004
+    "height_offset_m" : 1.5
   },
   "pixels_per_meter" : 30.071333389446497,
   "project_id" : "5CE09E62-FB8A-4717-B912-6175123DD649",
