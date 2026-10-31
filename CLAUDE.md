@@ -161,6 +161,10 @@ Decision drivers to respect:
 - [ ] BLE trilateration prototype that outputs coordinates.
 - [ ] Blue-dot tracking in the app with horizontal error **< 4 m** consistently. *Milestone: Oct 16*
 - [ ] Noise reduction / position smoothing so the dot doesn't jump around.
+  - 2026-10-30: PDR (accelerometer steps + compass, `providers/pdr/`) feeds a step-driven filter
+    (`fusion/stepKalman.ts`): steps move the dot, BLE corrects it, standing still averages BLE, outliers gated.
+    Simulator: per-second jitter 2.6 → 1.0 m walking, 2.4 → 0.2 m standing; mean error 4.3 → 3.5 m.
+    Not yet verified on a device.
 - [ ] Monitor beacon namespace/instance IDs for changes on OIT's side.
 - [ ] (Future-proofing) vSLAM locating reaches ≥ 60% of BLE precision in ideal conditions (no people around).
 

@@ -61,7 +61,27 @@ export interface MapPosition {
   timestamp: number
 }
 
-export type ProviderId = 'ble' | 'gps'
+export type ProviderId = 'ble' | 'gps' | 'pdr'
+
+/** One step from pedestrian dead reckoning: a relative move, not a position. */
+export interface PdrStep {
+  timestamp: number
+  lengthM: number
+  /** Direction of the step in degrees clockwise from **true** north, or null without a compass */
+  headingDeg: number | null
+  /** Roughly a 1-sigma heading error in degrees */
+  headingAccuracyDeg: number
+}
+
+/** What the motion sensors say right now. Sent a few times a second while they run. */
+export interface MotionState {
+  timestamp: number
+  /** A step was detected recently */
+  isMoving: boolean
+  /** Smoothed compass heading in degrees clockwise from **true** north, or null without a compass */
+  headingDeg: number | null
+  headingAccuracyDeg: number
+}
 
 export interface ProviderStatus {
   provider: ProviderId
@@ -131,6 +151,8 @@ export interface VenueConfig {
   name: string
   /** WGS84 anchor of the campus ENU frame. All ENU coordinates in this config are relative to it. */
   origin: Wgs84
+  /** Magnetic declination (degrees east of true north) added to compass headings. 0 if absent. */
+  magneticDeclinationDeg?: number
   buildings: Building[]
   beacons: BeaconRegistryEntry[]
 }

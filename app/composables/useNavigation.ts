@@ -5,7 +5,7 @@
 import { Capacitor } from '@capacitor/core'
 import { readonly, ref } from 'vue'
 import { listBeacons } from '~/db/beacons'
-import { createDeviceLocationService, spnVenue, withStoredBeacons, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
+import { createDeviceLocationService, requestMotionPermission, spnVenue, withStoredBeacons, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
 import { routeBetween } from '~/utils/route-between'
 
 export type { MapPosition }
@@ -27,7 +27,7 @@ let staleTimer: ReturnType<typeof setInterval> | null = null
 let users = 0
 
 export function useNavigation() {
-  /** Starts BLE positioning (a no-op off-device). Failures show up in locationStatus, not as errors. */
+  /** Starts BLE positioning, aided by steps + compass (a no-op off-device). Call it from a user tap. Failures show up in locationStatus, not as errors. */
   async function startLocation() {
     users++
     if (service) return
@@ -36,11 +36,16 @@ export function useNavigation() {
       locationMessage.value = 'Live location only works in the iOS/Android app.'
       return
     }
+    // Step + compass tracking smooths the dot. iOS only asks for motion permission during the user's tap,
+    // so ask now, before the awaits below; the PDR provider reads the answer when it starts.
+    void requestMotionPermission()
 
     // GPS is off: it was removed from the map page and doesn't help inside SPN1
     const created = createDeviceLocationService({ gps: false })
     service = created
     created.onStatus(status => {
+      // Only BLE decides whether there's a live location; without motion sensors it still works, just less smoothly
+      if (status.provider !== 'ble') return
       locationStatus.value = status.state
       locationMessage.value = status.message ?? ''
     })

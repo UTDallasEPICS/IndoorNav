@@ -5,6 +5,7 @@ import type { LocationEvent, LocationFix } from '../types'
 import { FusionEngine } from './FusionEngine'
 import { IndoorOutdoorDetector } from './indoorOutdoor'
 import { ConstantVelocityKalman } from './kalman'
+import { StepKalman } from './stepKalman'
 
 function makeFix(source: LocationFix['source'], e: number, n: number, timestamp: number, extra: Partial<LocationFix> = {}): LocationFix {
   const enu = { e, n, u: 0 }
@@ -169,9 +170,94 @@ describe('FusionEngine', () => {
     expect(fixes.at(-1)!.headingDeg).toBeCloseTo(90, -1) // walking east
   })
 
-  it('leaves PDR fixes for later (extension point)', () => {
+  it('ignores PDR fixes (steps arrive through ingestStep)', () => {
     const { engine, fixes } = setup()
     engine.ingest(makeFix('pdr', 130, 65, 0))
     expect(fixes).toHaveLength(0)
+  })
+})
+
+describe('StepKalman', () => {
+  it('moves by each step along its heading', () => {
+    const kf = new StepKalman()
+    kf.seed(0, 0, 2, 0)
+    for (let i = 1; i <= 10; i++) kf.step(0.7, 90, 10, i * 500)
+    expect(kf.state()!.e).toBeCloseTo(7)
+    expect(kf.state()!.n).toBeCloseTo(0)
+  })
+
+  it('holds still against BLE noise while standing', () => {
+    const kf = new StepKalman()
+    kf.seed(0, 0, 3, 0)
+    kf.setMoving(false)
+    let maxMove = 0
+    let last = { e: 0, n: 0 }
+    for (let i = 1; i <= 60; i++) {
+      kf.update(i % 2 ? 4 : -4, i % 3 ? 3 : -5, 3, i * 1000)
+      const s = kf.state()!
+      if (i > 10) maxMove = Math.max(maxMove, Math.hypot(s.e - last.e, s.n - last.n)) // after the first few fixes average in
+      last = s
+    }
+    expect(maxMove).toBeLessThan(0.5)
+    expect(Math.hypot(last.e, last.n)).toBeLessThan(1.5)
+  })
+
+  it('drops a single wild BLE fix', () => {
+    const kf = new StepKalman()
+    kf.seed(0, 0, 2, 0)
+    kf.update(30, 0, 2, 1000)
+    expect(kf.state()!.e).toBeCloseTo(0)
+  })
+
+  it('relocalizes when BLE keeps disagreeing', () => {
+    const kf = new StepKalman()
+    kf.seed(0, 0, 1, 0)
+    for (let i = 1; i <= 4; i++) kf.update(30 + (i % 2), 0, 2, i * 1000)
+    expect(kf.state()!.e).toBeCloseTo(30.5)
+  })
+
+  it('is less sure across a step than along it when the heading is poor', () => {
+    const kf = new StepKalman()
+    kf.seed(0, 0, 0.01, 0)
+    for (let i = 1; i <= 10; i++) kf.step(0.7, 0, 30, i * 500) // walking north
+    kf.update(1, 8, 1, 5000) // BLE says 1 m east, 1 m north of the estimate
+    const s = kf.state()!
+    expect(s.e).toBeGreaterThan(s.n - 7) // the cross-track (east) offset is believed more than the along-track one
+  })
+})
+
+describe('FusionEngine with motion sensors', () => {
+  function setup() {
+    const engine = new FusionEngine(sampleVenue)
+    const fixes: LocationFix[] = []
+    engine.onFix((f) => fixes.push(f))
+    return { engine, fixes }
+  }
+
+  it('moves the dot with steps between BLE fixes', () => {
+    const { engine, fixes } = setup()
+    engine.ingestMotion({ timestamp: 0, isMoving: false, headingDeg: 90, headingAccuracyDeg: 10 })
+    engine.ingest(bleFix(130, 65, 0))
+    engine.ingestStep({ timestamp: 500, lengthM: 0.7, headingDeg: 90, headingAccuracyDeg: 10 })
+    engine.ingestStep({ timestamp: 1000, lengthM: 0.7, headingDeg: 90, headingAccuracyDeg: 10 })
+    expect(fixes.at(-1)!.enu.e).toBeCloseTo(131.4)
+    expect(fixes.at(-1)!.headingDeg).toBe(90)
+  })
+
+  it('takes the heading from the compass while standing', () => {
+    const { engine, fixes } = setup()
+    engine.ingestMotion({ timestamp: 0, isMoving: false, headingDeg: 200, headingAccuracyDeg: 10 })
+    engine.ingest(bleFix(130, 65, 0))
+    engine.ingestMotion({ timestamp: 250, isMoving: false, headingDeg: 210, headingAccuracyDeg: 10 })
+    expect(fixes.at(-1)).toMatchObject({ headingDeg: 210, timestamp: 250 })
+  })
+
+  it('falls back to the BLE-only filter when the motion sensors go quiet', () => {
+    const { engine, fixes } = setup()
+    engine.ingestMotion({ timestamp: 0, isMoving: false, headingDeg: 90, headingAccuracyDeg: 10 })
+    engine.ingest(bleFix(130, 65, 0))
+    engine.ingest(bleFix(130, 65, 1000))
+    engine.ingest(bleFix(136, 65, 10_000)) // 10 s without motion data: no "you're standing still" damping
+    expect(fixes.at(-1)!.enu.e).toBeGreaterThan(134)
   })
 })

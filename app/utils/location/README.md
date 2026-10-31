@@ -1,7 +1,7 @@
 # Location module
 
-Finds the user's position on-device from BLE beacons (indoors) and GPS (outdoors), and emits one
-smoothed stream of `LocationFix`es for the map UI and routing. Nothing here talks to a server (C02).
+Finds the user's position on-device from BLE beacons (indoors) and GPS (outdoors), steadied by step + compass
+tracking (PDR), and emits one smoothed stream of `LocationFix`es for the map UI and routing. Nothing here talks to a server (C02).
 
 The app reaches it through the core module, `app/composables/useNavigation.ts` (`position`, `startLocation`,
 `routeTo`, ...). To use the service directly:
@@ -87,13 +87,18 @@ CapacitorBleScanner ─ BeaconAdvert ─► BleProvider
                                         estimator: weightedCentroid | leastSquares
                                         └─► LocationFix (source 'ble') ─┐
 CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') ─┤
+CapacitorMotionSource ─ accel + compass ─► PdrProvider                  │
+                                             StepDetector (|a| bumps, Weinberg step length)
+                                             HeadingSmoother (+ magnetic declination → true north)
+                                             └─► PdrStep + MotionState ─┤
                                                                        ▼
                                         FusionEngine
                                           IndoorOutdoorDetector (footprint + BLE heard + GPS quality,
                                                                  2-of-3 vote, 3 s hysteresis)
                                           indoors: BLE drives position (GPS only if no beacons heard)
                                           outdoors: GPS drives position
-                                          ConstantVelocityKalman (accuracy-weighted)
+                                          motion sensors running: StepKalman (steps move, BLE corrects)
+                                          otherwise:              ConstantVelocityKalman (accuracy-weighted)
                                           └─► LocationFix ('fused') + LocationEvents
                                                                        ▼
                                         LocationService ─► app (subscribe / currentFix / status)
@@ -106,6 +111,7 @@ CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') 
 | `geo/` | WGS84/ECEF/ENU, floor plan ↔ ENU, point-in-polygon | no |
 | `providers/ble/` | Scanner interface + mock, Eddystone parsing, RSSI filter, path loss, estimators, floor vote, `BleProvider` | only `capacitorScanner.ts` |
 | `providers/gps/` | GPS source interface + mock, `GpsProvider` | only `capacitorGpsSource.ts` |
+| `providers/pdr/` | Motion source interface + mock, step detector, compass heading, `PdrProvider` | only `capacitorMotionSource.ts` |
 | `fusion/` | Kalman filter, indoor/outdoor detector, `FusionEngine` | no |
 | `sim/` | Synthetic RSSI/GPS generator, pipeline runner, error report | no |
 | `fixtures/` | **Placeholder** sample venue (1 building, 2 floors, 12 beacons) and walk | no |
@@ -117,8 +123,34 @@ CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') 
 - Per beacon: `txPower` (RSSI at 1 m) and `pathLossExponent` come from the survey fit (see **Beacon data**).
   Re-survey to recalibrate; beacons without a fit use `DEFAULT_BEACON_REGISTRY_OPTIONS`.
 - `FusionEngine` options: Kalman `accelerationNoise`, indoor/outdoor `switchAfterMs`, `gpsGoodAccuracyM`.
+- `StepKalman` (`fusion/stepKalman.ts`): `stationaryMeasurementScale` and `stationaryNoise` (how hard the dot holds
+  still while you stand), `movingNoise`, `gateChi2` / `relocalizeAfter` (outlier rejection).
+- `PdrProvider` options: step `thresholdMs2` / `weinbergK`, `headingSmoothingMs`, `defaultHeadingAccuracyDeg`.
 
-## Adding a provider (e.g. the Mist SDK, or PDR)
+## Smoothing with steps and compass (PDR)
+
+While the accelerometer and compass run, `FusionEngine` switches from the constant-velocity filter to `StepKalman`:
+
+- **Steps move the dot.** Each detected step moves the estimate by its length along the compass heading, so the dot
+  advances step by step between BLE fixes instead of waiting for (and lagging behind) them.
+- **BLE corrects, it doesn't drive.** Between steps the estimate barely drifts, so a noisy BLE fix only nudges it.
+  Each step adds uncertainty mostly *across* the walking direction (heading error), so BLE fixes pull hardest
+  sideways, where PDR is weakest.
+- **Standing still averages.** With no steps, BLE fixes are down-weighted (`stationaryMeasurementScale`) and the
+  random walk is tiny, so the estimate becomes a running average of every fix since you stopped. In the simulator
+  this takes standing jitter from ~2.4 m to ~0.2 m per second.
+- **Outliers are dropped.** A BLE fix far outside the filter's uncertainty is ignored. If `relocalizeAfter` fixes
+  in a row disagree, the filter assumes it's lost (missed steps, bad compass) and restarts at their average.
+- The heading arrow follows the compass (a few updates a second), not the velocity. Indoors the compass can be off
+  by tens of degrees near steel; it's treated as a soft signal (`defaultHeadingAccuracyDeg`, 20°), and BLE pulls
+  the track back when it drifts.
+- If motion permission is denied or the sensors go quiet for 2 s, fusion falls back to the BLE-only filter.
+
+PDR assumes the phone is held in front, roughly pointing the way you walk. A phone in a pocket still counts steps,
+but its compass heading is wrong; the gate + relocalize logic limits the damage. iOS asks for motion permission,
+which must happen during a tap: `useNavigation().startLocation()` calls `requestMotionPermission()` first thing.
+
+## Adding a provider (e.g. the Mist SDK)
 
 1. Put platform calls behind a small interface with a mock, like `BleScanner` / `MockBleScanner`.
    Only the Capacitor implementation file may import a plugin.
@@ -128,8 +160,7 @@ CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') 
 3. Add its id to `ProviderId` in `types.ts` and pass it to `new LocationService({ providers: [...] })`
    (or to `createDeviceLocationService`).
 4. Decide how `FusionEngine.ingest` should use it. `'mist'` fixes are already treated like BLE.
-   PDR is a relative move, not a position. See the `EXTENSION POINT (PDR)` comment in
-   `fusion/FusionEngine.ts`. A particle filter can replace the Kalman filter by implementing
+   Relative inputs (like PDR) go through their own methods (`ingestStep`, `ingestMotion`). A particle filter can replace the Kalman filter by implementing
    `PositionFilter` (`EXTENSION POINT (particle filter)` in `fusion/kalman.ts`).
 5. Add tests using the mock and, if relevant, extend `sim/` to generate its readings.
 
@@ -159,5 +190,8 @@ in SPN1 (see the CSV/checkpoint success criterion in CLAUDE.md).
   are stable per AP (not rotated or re-provisioned), and to give us each AP's position.
 - **GPS altitude:** iOS reports height above sea level, Android above the ellipsoid. That's a ~25 m
   difference here, so fused fixes ignore GPS height (u = floorZ indoors, 0 outdoors).
-- **Heading** comes from the GPS course or the fused velocity only. Compass/magnetometer heading is the
-  Direction workstream's job.
+- **Heading** comes from the compass while the motion sensors run, otherwise from the GPS course or the fused
+  velocity. Not yet checked on a device: compass accuracy inside SPN1, Android `deviceorientationabsolute` in the
+  WebView, and step detection thresholds for different phones/gaits.
+- **Walls:** nothing yet stops the dot from crossing a wall. A particle filter on the route grid
+  (`EXTENSION POINT (particle filter)`) is the natural next step.
