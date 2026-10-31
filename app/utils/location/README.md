@@ -69,7 +69,8 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
 - **Adding a survey:** copy the export's `*_beacons_*.csv` and `*_floor_*.json` into `public/data/surveys/` as
   `<building>-level<N>-beacons-<stamp>.csv` / `-floor-<stamp>.json`, and append it to `surveys` in `seed.ts`
   (oldest first). Devices import it on next launch. A later survey overwrites a beacon's data, but a survey that
-  couldn't place a beacon doesn't erase an earlier position. To replace a survey, swap it out of `surveys`: on next launch
+  couldn't place a beacon doesn't erase an earlier position. Each survey also hears APs on the floors above and
+  below; an AP in surveys of different floors stays on the floor whose survey heard it strongest (max RSSI). To replace a survey, swap it out of `surveys`: on next launch
   the seed deletes surveys no longer listed and the beacons they last set (`removeStaleSurveys`).
 - **Check the export's georeference** before adding it. The level 1 exports (2026-10-21 through 2026-10-30) have it wrong (image-right
   set to east; it's south), so `seed.ts` overrides it with `geo`, fitted from room labels matched between the

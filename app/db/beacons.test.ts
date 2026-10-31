@@ -165,6 +165,30 @@ describe('importBeaconSurvey (in SQLite)', () => {
     expect((await listBeacons(db)).map((b) => b.instance)).toEqual(['41022*e40000'])
     expect(await db.select().from(schema.beacon_surveys)).toHaveLength(1)
   })
+
+  it('keeps an AP heard from both floors on the floor that hears it strongest, in either import order', async () => {
+    const L2 = 'public/data/surveys/spn-level2'
+    const csv2 = readFileSync(`${L2}-beacons-20261030-2057.csv`, 'utf8')
+    const floor2: SurveyFloorMeta = { ...JSON.parse(readFileSync(`${L2}-floor-20261030-2057.json`, 'utf8')), geo: SPN1_LEVEL2.surveys[0]!.geo }
+    const level1 = { floorId: 1, name: 's1', csv, floor }
+    const level2 = { floorId: 2, name: 's2', csv: csv2, floor: floor2 }
+    const seedBoth = async (order: typeof level1[]) => {
+      const db = await openDb()
+      await db.insert(schema.floors).values({ building_id: 1, level: 2, svg_path: '', grid_path: '' })
+      for (const survey of order) await importBeaconSurvey(db, survey)
+      return listBeacons(db)
+    }
+
+    const stored = await seedBoth([level1, level2])
+    const key = (b: StoredBeacon) => `${b.namespace}:${b.instance}:${b.level}:${b.latitude}`
+    expect((await seedBoth([level2, level1])).map(key).sort()).toEqual(stored.map(key).sort())
+
+    const registry = toBeaconRegistry(stored, spnVenue)
+    expect(stored).toHaveLength(103) // 71 + 81 - 49 APs in both surveys
+    // 37 and 41 seeded alone: an AP in both surveys now counts only on its stronger floor, with that survey's fit
+    expect(registry.filter((b) => b.floorId === 'spn1-l1')).toHaveLength(30)
+    expect(registry.filter((b) => b.floorId === 'spn1-l2')).toHaveLength(33)
+  })
 })
 
 describe('SPN1 level 2 survey (2026-10-30, vBLE beams grouped)', () => {

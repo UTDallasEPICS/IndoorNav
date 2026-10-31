@@ -155,7 +155,8 @@ const INSERT_CHUNK = 25
 /**
  * Imports one survey onto a floor, unless a survey with this name was already imported. Beacons are matched by
  * namespace + instance; a later survey replaces a beacon's data, except that a survey which couldn't place a
- * beacon doesn't wipe a position an earlier survey found. Safe to re-run after an interruption.
+ * beacon doesn't wipe a position an earlier survey found. A beacon in surveys of different floors belongs to the
+ * floor whose survey heard it strongest (max RSSI). Safe to re-run after an interruption.
  */
 export async function importBeaconSurvey(
   db: SqliteRemoteDatabase<typeof schema>,
@@ -184,7 +185,11 @@ export async function importBeaconSurvey(
       .onConflictDoUpdate({
         target: [beacons.namespace, beacons.instance],
         set,
-        setWhere: sql`excluded.latitude IS NOT NULL OR ${beacons.latitude} IS NULL`
+        // Same floor: replace, unless it would erase a position. Another floor (an AP heard through the floor or
+        // ceiling): the AP stays on the floor where it was heard strongest, whatever order the floors import in.
+        setWhere: sql`CASE WHEN excluded.floor_id = ${beacons.floor_id}
+          THEN excluded.latitude IS NOT NULL OR ${beacons.latitude} IS NULL
+          ELSE excluded.max_rssi_dbm > ${beacons.max_rssi_dbm} OR ${beacons.max_rssi_dbm} IS NULL END`
       })
   }
 

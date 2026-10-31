@@ -154,6 +154,8 @@ Decision drivers to respect:
     used. Scans match any beam to its AP (`resolveBeaconId`).
   - 2026-10-30: level 2 added: map georeferenced by image registration (~1 m), 2026-10-30 survey imported
     (81 APs, 41 good/fair used, scale corrected 4%). Floor height 4.27 m assumed. No level 2 routing grid yet.
+    49 AP IDs are in both floors' surveys; each is kept on the floor that hears it strongest, so seeding both
+    floors gives 30 usable APs on level 1 and 33 on level 2 (`beacons.test.ts`).
 - [ ] Get written non-objection from OIT for passive BLE reception. *Due Oct 16*
 - [ ] Confirm a Capacitor BLE plugin reads advertisements on current iOS **and** Android devices.
 - [ ] BLE trilateration prototype that outputs coordinates.
