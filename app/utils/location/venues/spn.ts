@@ -1,4 +1,4 @@
-// SPN1 (Synergy Park North, building 1) as the location module sees it. Only level 1 has map data for now.
+// SPN1 (Synergy Park North, building 1) as the location module sees it: levels 1 and 2.
 //
 // Plan units: 1 = the full width of public/maps/spn-level1.svg, so a plan point is { x: fx, y: fy * PLAN_HEIGHT }
 // for map fractions fx, fy. The transform is fitted from the corners the map page used for GPS before it was
@@ -38,6 +38,39 @@ const level1: Floor = {
   plan: { width: 1, height: PLAN_HEIGHT }
 }
 
+/** Level 2 map SVG height / width (viewBox 1000000 x 399778); plan units are level 2 map widths */
+const LEVEL2_PLAN_HEIGHT = 399778 / 1000000
+
+/**
+ * Level 2 map corners as lat/lon. spn-level2.svg was registered onto the level 2 survey's floorplan image
+ * (0.4 px mean line distance), that image onto level 1's (walls, columns, stair and elevator cores line up), and
+ * level 1's image is georeferenced through the level 1 survey override (app/db/seed.ts). The same chain puts
+ * level 1's satellite corners within 0.2–1.1 m of where they are surveyed.
+ */
+const LEVEL2_CORNERS = [
+  { lat: 32.99451163820989, lon: -96.75197168552215, x: 0, y: 0 },
+  { lat: 32.993390061542684, lon: -96.75197355062053, x: 1, y: 0 },
+  { lat: 32.994512266547424, lon: -96.75250376375689, x: 0, y: 1 },
+  { lat: 32.99339068988021, lon: -96.75250562885526, x: 1, y: 1 }
+]
+
+/** Floor-to-floor height. Not measured: a typical 14 ft. Only affects reported heights, not 2D positions */
+const LEVEL2_FLOOR_Z = 4.27
+
+export const SPN_LEVEL2_FIT = fitFloorTransform(
+  { floorId: 'spn1-l2', floorZ: LEVEL2_FLOOR_Z },
+  LEVEL2_CORNERS.map(({ lat, lon, x, y }) => ({ lat, lon, x, y: y * LEVEL2_PLAN_HEIGHT })),
+  SPN_ORIGIN
+)
+
+const level2: Floor = {
+  id: 'spn1-l2',
+  name: 'Level 2',
+  level: 2,
+  transform: SPN_LEVEL2_FIT.transform,
+  plan: { width: 1, height: LEVEL2_PLAN_HEIGHT }
+}
+
 /** The map's bounding rectangle, standing in for the building outline until we have a real footprint */
 const footprint = [[0, 0], [1, 0], [1, PLAN_HEIGHT], [0, PLAN_HEIGHT]].map(([x, y]) => {
   const { lat, lon } = enuToWgs84(planToEnu({ x: x!, y: y! }, level1.transform), SPN_ORIGIN)
@@ -54,6 +87,6 @@ export const spnVenue: VenueConfig = {
   id: 'utd',
   name: 'UT Dallas',
   origin: SPN_ORIGIN,
-  buildings: [{ id: 'spn1', name: 'Synergy Park North 1', footprint, floors: [level1] }],
+  buildings: [{ id: 'spn1', name: 'Synergy Park North 1', footprint, floors: [level1, level2] }],
   beacons
 }

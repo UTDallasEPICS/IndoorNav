@@ -44,7 +44,9 @@ Everything else is internal.
   `{ x, y, floor, accuracyM, timestamp }`. Floors without `plan` produce no `MapPosition`.
 - **SPN1** (`venues/spn.ts`): plan units are map widths (the plan is 1 × 0.457867). The level 1 transform
   is fitted (`geo/georef.ts`) from three satellite-surveyed corners: 0.76 m RMS, map ≈ 126 m wide,
-  map "up" ≈ east. Its `beacons` list is empty in code: see **Beacon data** below.
+  map "up" ≈ east. Level 2 (plan 1 × 0.399778, its own SVG frame) is fitted by image registration
+  (`venues/spn.ts`, ~1 m); its floor height (4.27 m) is assumed, which doesn't affect 2D positions.
+  The `beacons` list is empty in code: see **Beacon data** below.
 - Every fix has `enu` + `floorId` (null outdoors) + `wgs84`. `accuracyM` is roughly a 1-sigma horizontal
   radius. Headings are degrees clockwise from **true** north.
 
@@ -67,11 +69,13 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
 - **Adding a survey:** copy the export's `*_beacons_*.csv` and `*_floor_*.json` into `public/data/surveys/` as
   `<building>-level<N>-beacons-<stamp>.csv` / `-floor-<stamp>.json`, and append it to `surveys` in `seed.ts`
   (oldest first). Devices import it on next launch. A later survey overwrites a beacon's data, but a survey that
-  couldn't place a beacon doesn't erase an earlier position. To replace a survey, swap it out of `surveys`: on next launch
+  couldn't place a beacon doesn't erase an earlier position. Each survey also hears APs on the floors above and
+  below; an AP in surveys of different floors stays on the floor whose survey heard it strongest (max RSSI). To replace a survey, swap it out of `surveys`: on next launch
   the seed deletes surveys no longer listed and the beacons they last set (`removeStaleSurveys`).
 - **Check the export's georeference** before adding it. The level 1 exports (2026-10-21 through 2026-10-30) have it wrong (image-right
   set to east; it's south), so `seed.ts` overrides it with `geo`, fitted from room labels matched between the
-  survey's floorplan image and the map SVG. `beacons.test.ts` fails if surveyed beacons fall off the map.
+  survey's floorplan image and the map SVG. Level 2's export also has a ~4% scale error, corrected with
+  `geo.scale`. `beacons.test.ts` fails if surveyed beacons fall off the map.
 
 ## Data flow
 
