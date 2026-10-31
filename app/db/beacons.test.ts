@@ -7,7 +7,7 @@ import { wgs84ToEnu } from '../utils/location/geo/wgs84'
 import { spnVenue } from '../utils/location/venues/spn'
 import { importBeaconSurvey, listBeacons, parseBeaconSurvey, parseCsv, removeStaleSurveys, surveyLocalToWgs84, type SurveyFloorMeta } from './beacons'
 import * as schema from './schema'
-import { SPN1_LEVEL1 } from './seed'
+import { SPN1_LEVEL1, SPN1_LEVEL2 } from './seed'
 
 const SURVEY = 'public/data/surveys/spn-level1'
 const csv = readFileSync(`${SURVEY}-beacons-20261030-2055.csv`, 'utf8')
@@ -164,5 +164,47 @@ describe('importBeaconSurvey (in SQLite)', () => {
     expect(await removeStaleSurveys(db, 1, ['new'])).toBe(0)
     expect((await listBeacons(db)).map((b) => b.instance)).toEqual(['41022*e40000'])
     expect(await db.select().from(schema.beacon_surveys)).toHaveLength(1)
+  })
+})
+
+describe('SPN1 level 2 survey (2026-10-30, vBLE beams grouped)', () => {
+  const L2 = 'public/data/surveys/spn-level2'
+  const csv2 = readFileSync(`${L2}-beacons-20261030-2057.csv`, 'utf8')
+  const exported2: SurveyFloorMeta = JSON.parse(readFileSync(`${L2}-floor-20261030-2057.json`, 'utf8'))
+  const floor2: SurveyFloorMeta = { ...exported2, geo: SPN1_LEVEL2.surveys[0]!.geo }
+  const { beacons } = parseBeaconSurvey(csv2, floor2)
+  const registry = toBeaconRegistry(beacons.map((b) => ({
+    namespace: b.namespace,
+    instance: b.instance,
+    building: 'SPN1',
+    level: 2,
+    status: b.status,
+    latitude: b.latitude ?? null,
+    longitude: b.longitude ?? null,
+    txPowerDbm: b.tx_power_dbm ?? null,
+    pathLossExponent: b.path_loss_exponent ?? null,
+    heightOffsetM: exported2.path_loss?.height_offset_m ?? null
+  })), spnVenue)
+
+  it('keeps the trusted APs on level 2', () => {
+    expect(beacons).toHaveLength(81)
+    expect(registry).toHaveLength(41) // 6 good + 35 fair APs
+    expect(registry.every((b) => b.floorId === 'spn1-l2')).toBe(true)
+  })
+
+  it('places the beacons on the SPN1 level 2 map', () => {
+    const level2 = spnVenue.buildings[0]!.floors.find((f) => f.level === 2)!
+    const onMap = registry.filter((b) => {
+      const { x, y } = enuToPlan(b.enu, level2.transform)
+      return x >= 0 && x <= level2.plan!.width && y >= 0 && y <= level2.plan!.height
+    })
+    expect(onMap.length / registry.length).toBeGreaterThan(0.95)
+  })
+
+  it('applies the scale correction to the export\'s meters', () => {
+    const at = (geo: SurveyFloorMeta['geo']) => surveyLocalToWgs84(100, 0, { ...floor2, geo })
+    const origin = surveyLocalToWgs84(0, 0, floor2)
+    const { e, n } = wgs84ToEnu({ ...at(floor2.geo), h: 0 }, { ...origin, h: 0 })
+    expect(Math.hypot(e, n)).toBeCloseTo(95.98, 1)
   })
 })

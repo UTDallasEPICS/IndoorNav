@@ -14,8 +14,11 @@ const { beacon_surveys, beacons, buildings, floors } = schema
 export interface SurveyFloorMeta {
   project_id?: string
   exported_at?: string
-  /** Local frame anchor: local (0, 0) sits at origin_latitude/longitude, local +x points at x_axis_bearing_deg */
-  geo: { origin_latitude: number, origin_longitude: number, x_axis_bearing_deg: number }
+  /**
+   * Local frame anchor: local (0, 0) sits at origin_latitude/longitude, local +x points at x_axis_bearing_deg.
+   * `scale` (ours, not bSLAM's) corrects a miscalibrated export: real meters = local meters * scale.
+   */
+  geo: { origin_latitude: number, origin_longitude: number, x_axis_bearing_deg: number, scale?: number }
   /** "counterclockwise_from_x (cartesian)" or clockwise (image-style, y down) */
   y_axis: string
   path_loss?: { height_offset_m?: number | null }
@@ -54,8 +57,9 @@ export function surveyLocalToWgs84(x: number, y: number, floor: SurveyFloorMeta)
   const xBearing = (floor.geo.x_axis_bearing_deg * Math.PI) / 180
   // Cartesian y is 90° counterclockwise of x; image-style y is 90° clockwise
   const yBearing = xBearing + (isClockwise(floor) ? Math.PI / 2 : -Math.PI / 2)
-  const e = x * Math.sin(xBearing) + y * Math.sin(yBearing)
-  const n = x * Math.cos(xBearing) + y * Math.cos(yBearing)
+  const scale = floor.geo.scale ?? 1
+  const e = (x * Math.sin(xBearing) + y * Math.sin(yBearing)) * scale
+  const n = (x * Math.cos(xBearing) + y * Math.cos(yBearing)) * scale
   const { lat, lon } = enuToWgs84({ e, n, u: 0 }, { lat: floor.geo.origin_latitude, lon: floor.geo.origin_longitude, h: 0 })
   return { lat, lon }
 }
