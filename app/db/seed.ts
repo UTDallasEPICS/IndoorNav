@@ -1,6 +1,6 @@
 import { and, count, eq } from 'drizzle-orm'
 import type { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
-import { importBeaconSurvey, isSurveyImported, type SurveyFloorMeta } from './beacons'
+import { importBeaconSurvey, isSurveyImported, removeStaleSurveys, type SurveyFloorMeta } from './beacons'
 import * as schema from './schema'
 
 const { buildings, floors, rooms } = schema
@@ -14,10 +14,11 @@ export const SPN1_LEVEL1 = {
   // `geo` overrides the export's georeference (where the survey's local frame sits on Earth).
   surveys: [
     {
-      name: 'spn-level1-20261021-1103',
-      csv_path: '/data/surveys/spn-level1-beacons-20261021-1103.csv',
-      floor_path: '/data/surveys/spn-level1-floor-20261021-1103.json',
-      // The export's georeference is wrong: it gives the image's bottom-left corner (blank paper) the lat/lon of
+      // vBLE beams grouped per AP (group_virtual_beacons)
+      name: 'spn-level1-20261030-2055',
+      csv_path: '/data/surveys/spn-level1-beacons-20261030-2055.csv',
+      floor_path: '/data/surveys/spn-level1-floor-20261030-2055.json',
+      // The export's georeference is wrong (unchanged since the 2026-10-21 export, same floorplan image and frame): it gives the image's bottom-left corner (blank paper) the lat/lon of
       // the UT Design 1.2 corner, with image-right pointing east. Image-right is actually south, as on our map.
       // Re-anchored by matching 58 room labels between the survey's floorplan image and spn-level1.svg, through
       // the level 1 satellite fit (venues/spn.ts): 0.22 m RMS keeping the survey's own scale. Remove this once
@@ -61,6 +62,8 @@ export async function seed(db: SqliteRemoteDatabase<typeof schema>) {
     })))
   }
 
+  // Surveys dropped from the list (e.g. replaced by a re-survey) are removed along with the beacons they set
+  await removeStaleSurveys(db, floor!.id, SPN1_LEVEL1.surveys.map(s => s.name))
   for (const survey of SPN1_LEVEL1.surveys) {
     if (await isSurveyImported(db, survey.name)) continue
     const [csv, floorMeta] = await Promise.all([

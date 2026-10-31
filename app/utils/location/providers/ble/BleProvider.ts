@@ -74,9 +74,11 @@ export class BleProvider implements LocationProvider {
 
   /** Feeds one advert in. Emits a fix at most once per updateIntervalMs (timed by advert timestamps). */
   handleAdvert(advert: BeaconAdvert) {
-    // Ignore beacons that aren't in our registry (phones, headphones, other buildings' APs)
-    if (!this.index?.beacons.has(advert.beaconId)) return
-    this.bank.add(advert.beaconId, advert.rssi, advert.timestamp)
+    // Ignore beacons that aren't in our registry (phones, headphones, other buildings' APs).
+    // An AP's vBLE beams share one registry entry, so they feed one RSSI filter.
+    const beaconId = this.index?.resolveBeaconId(advert.beaconId)
+    if (!beaconId) return
+    this.bank.add(beaconId, advert.rssi, advert.timestamp)
     if (advert.timestamp - this.lastFixTime >= this.options.updateIntervalMs) {
       const fix = this.computeFix(advert.timestamp)
       if (fix) {

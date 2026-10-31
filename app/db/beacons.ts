@@ -2,7 +2,7 @@
 // Survey positions arrive in the survey's local metric frame; everything is converted to WGS84 here and the local
 // frame is not stored.
 
-import { and, eq, getTableColumns, gt, sql } from 'drizzle-orm'
+import { and, eq, getTableColumns, gt, inArray, notInArray, sql } from 'drizzle-orm'
 import type { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { enuToWgs84 } from '../utils/location/geo/wgs84'
 import type { StoredBeacon } from '../utils/location/beaconRegistry'
@@ -186,6 +186,20 @@ export async function importBeaconSurvey(
 
   await db.update(beacon_surveys).set({ imported_at: Date.now() }).where(eq(beacon_surveys.id, surveyRow!.id))
   return { imported: rows.length, skipped }
+}
+
+/**
+ * Deletes a floor's imported surveys that aren't in `keep`, and the beacons they last set, so a replaced survey's
+ * beacons don't linger on devices that imported it. Beacons not set by a survey (survey_id null) are kept.
+ */
+export async function removeStaleSurveys(db: SqliteRemoteDatabase<typeof schema>, floorId: number, keep: string[]) {
+  const stale = await db.select({ id: beacon_surveys.id }).from(beacon_surveys)
+    .where(and(eq(beacon_surveys.floor_id, floorId), notInArray(beacon_surveys.name, keep)))
+  if (stale.length === 0) return 0
+  const ids = stale.map((s) => s.id)
+  await db.delete(beacons).where(inArray(beacons.survey_id, ids))
+  await db.delete(beacon_surveys).where(inArray(beacon_surveys.id, ids))
+  return ids.length
 }
 
 /** Every beacon with its building, floor level, and the survey's height offset, for `toBeaconRegistry` */
