@@ -184,6 +184,9 @@ importers:
       '@capacitor/ios':
         specifier: ^8.5.3
         version: 8.5.3(@capacitor/core@8.5.3)
+      '@capacitor/motion':
+        specifier: ^8.0.1
+        version: 8.0.1(@capacitor/core@8.5.3)
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(sql.js@1.15.1)
@@ -379,6 +382,11 @@ packages:
     resolution: {integrity: sha512-HnnV92Jl8+3x0JUloXUMjFcUsQI8wHFVsKwkLn72DfRZXYGZW11tQbmNOWOnRTljaU18FdI1b9ipT09SzzPDNw==}
     peerDependencies:
       '@capacitor/core': ^8.5.0
+
+  '@capacitor/motion@8.0.1':
+    resolution: {integrity: sha512-kON6AwzCzMmyw6A76G0zLF/Q7xVPMC66HSfTSCgpMNwoQkRMMMEDHQbfFxZYLmCcS/4apy3lzG/HTvE5coAZiw==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@capacitor/synapse@1.0.4':
     resolution: {integrity: sha512-/C1FUo8/OkKuAT4nCIu/34ny9siNHr9qtFezu4kxm6GY1wNFxrCFWjfYx5C1tUhVGz3fxBABegupkpjXvjCHrw==}
@@ -4318,6 +4326,10 @@ snapshots:
       '@capacitor/synapse': 1.0.4
 
   '@capacitor/ios@8.5.3(@capacitor/core@8.5.3)':
+    dependencies:
+      '@capacitor/core': 8.5.3
+
+  '@capacitor/motion@8.0.1(@capacitor/core@8.5.3)':
     dependencies:
       '@capacitor/core': 8.5.3
 

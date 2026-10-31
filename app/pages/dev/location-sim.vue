@@ -18,6 +18,10 @@
         <input v-model.number="rssiNoiseDb" type="number" min="0" max="15" step="0.5">
       </label>
       <label>
+        <input v-model="pdr" type="checkbox">
+        Steps + compass (PDR)
+      </label>
+      <label>
         Seed
         <input v-model.number="seed" type="number" min="1" step="1">
       </label>
@@ -68,6 +72,7 @@ import { indexVenue } from '~/utils/location/venue'
 
 const estimator = ref('leastSquares')
 const rssiNoiseDb = ref(DEFAULT_SIM.rssiNoiseDb)
+const pdr = ref(true)
 const seed = ref(1)
 const result = ref(null)
 
@@ -80,7 +85,8 @@ const rows = [
   { label: 'p90 error', key: 'p90M', format: meters },
   { label: 'Max error', key: 'maxM', format: meters },
   { label: 'Correct floor', key: 'floorCorrectRate', format: percent },
-  { label: 'Correct indoor/outdoor', key: 'indoorCorrectRate', format: percent }
+  { label: 'Correct indoor/outdoor', key: 'indoorCorrectRate', format: percent },
+  { label: 'Jitter (per second)', key: 'jitterM', format: meters }
 ]
 
 // SVG y points down, so north is drawn as -n
@@ -93,7 +99,8 @@ async function run() {
     venue: sampleVenue,
     path: sampleWalk,
     sim: { seed: seed.value, rssiNoiseDb: rssiNoiseDb.value },
-    ble: { estimator: estimator.value }
+    ble: { estimator: estimator.value },
+    pdr: pdr.value
   })
 }
 

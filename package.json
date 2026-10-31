@@ -25,6 +25,7 @@
     "@capacitor/core": "^8.5.3",
     "@capacitor/geolocation": "^8.2.4",
     "@capacitor/ios": "^8.5.3",
+    "@capacitor/motion": "^8.0.1",
     "drizzle-orm": "^0.45.4",
     "nuxt": "^4.5.2",
     "vue": "^3.5.43",

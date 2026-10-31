@@ -8,6 +8,8 @@ import { distanceToRssi } from '../providers/ble/pathLoss'
 import { MockBleScanner, type BeaconAdvert } from '../providers/ble/scanner'
 import { GpsProvider } from '../providers/gps/GpsProvider'
 import { MockGpsSource, type GpsReading } from '../providers/gps/gpsSource'
+import { MockMotionSource, type AccelSample, type CompassSample } from '../providers/pdr/motionSource'
+import { PdrProvider, type PdrProviderOptions } from '../providers/pdr/PdrProvider'
 import type { FusionOptions } from '../fusion/FusionEngine'
 import { indexVenue } from '../venue'
 import type { LocationEvent, LocationFix, VenueConfig } from '../types'
@@ -42,6 +44,19 @@ export interface SimOptions {
     outdoor: { noiseM: number, accuracyM: number }
     indoor: { noiseM: number, accuracyM: number, dropRate: number }
   }
+  /** Simulated phone motion sensors (only used when runSimulation gets `pdr`) */
+  motion: {
+    accelIntervalMs: number
+    compassIntervalMs: number
+    /** True step length; the detector estimates its own, so they differ a little */
+    stepLengthM: number
+    /** Peak acceleration swing per step (m/s^2) */
+    stepAmplitude: number
+    accelNoise: number
+    compassNoiseDeg: number
+    /** Constant compass error, as from steel nearby (degrees) */
+    compassBiasDeg: number
+  }
 }
 
 export const DEFAULT_SIM: SimOptions = {
@@ -57,6 +72,15 @@ export const DEFAULT_SIM: SimOptions = {
   gps: {
     outdoor: { noiseM: 3, accuracyM: 5 },
     indoor: { noiseM: 20, accuracyM: 30, dropRate: 0.4 }
+  },
+  motion: {
+    accelIntervalMs: 20,
+    compassIntervalMs: 50,
+    stepLengthM: 0.7,
+    stepAmplitude: 3,
+    accelNoise: 0.3,
+    compassNoiseDeg: 8,
+    compassBiasDeg: 5
   }
 }
 
@@ -130,6 +154,33 @@ export function generateGpsReadings(path: PathWaypoint[], venue: VenueConfig, op
   return readings
 }
 
+/** Accelerometer + compass samples for walking along the path: one acceleration bump per step, compass along the path. */
+export function generateMotion(path: PathWaypoint[], venue: VenueConfig, options: SimOptions = DEFAULT_SIM) {
+  const rng = createRng(options.seed + 2)
+  const m = options.motion
+  const accel: AccelSample[] = []
+  const compass: CompassSample[] = []
+  const endMs = path[path.length - 1]!.t * 1000
+  let phase = 0
+  let headingDeg = 0
+  for (let ms = 0; ms <= endMs; ms += m.accelIntervalMs) {
+    const a = truthAt(path, ms / 1000)
+    const b = truthAt(path, (ms + 200) / 1000)
+    const speed = Math.hypot(b.e - a.e, b.n - a.n) / 0.2
+    if (speed > 0.2) {
+      headingDeg = (Math.atan2(b.e - a.e, b.n - a.n) * 180 / Math.PI + 360) % 360
+      phase += 2 * Math.PI * (speed / m.stepLengthM) * m.accelIntervalMs / 1000
+    }
+    const bump = speed > 0.2 ? m.stepAmplitude * Math.sin(phase) : 0
+    accel.push({ x: rng.gaussian() * m.accelNoise, y: rng.gaussian() * m.accelNoise, z: 9.81 + bump + rng.gaussian() * m.accelNoise, timestamp: options.startTime + ms })
+    if (ms % m.compassIntervalMs < m.accelIntervalMs) {
+      const magnetic = headingDeg - (venue.magneticDeclinationDeg ?? 0) + m.compassBiasDeg + rng.gaussian() * m.compassNoiseDeg
+      compass.push({ headingDeg: (magnetic + 360) % 360, accuracyDeg: null, timestamp: options.startTime + ms })
+    }
+  }
+  return { accel, compass }
+}
+
 export interface ErrorReport {
   count: number
   meanM: number
@@ -140,6 +191,8 @@ export interface ErrorReport {
   floorCorrectRate: number
   /** Share of fixes whose isIndoor matches the truth */
   indoorCorrectRate: number
+  /** How much the dot jumps around: RMS of its move minus the true move, over (at least) 1 s steps (m) */
+  jitterM: number
 }
 
 /** Horizontal error of each fix against the truth at the fix's timestamp. */
@@ -148,6 +201,9 @@ export function errorReport(fixes: LocationFix[], path: PathWaypoint[], startTim
   let indoorFixes = 0
   let floorCorrect = 0
   let indoorCorrect = 0
+  let jitterSum = 0
+  let jitterCount = 0
+  let previous: { fix: LocationFix, truth: { e: number, n: number } } | null = null
   for (const fix of fixes) {
     const truth = truthAt(path, (fix.timestamp - startTime) / 1000)
     errors.push(Math.hypot(fix.enu.e - truth.e, fix.enu.n - truth.n))
@@ -155,6 +211,15 @@ export function errorReport(fixes: LocationFix[], path: PathWaypoint[], startTim
     if (truth.floorId !== null) {
       indoorFixes++
       if (fix.floorId === truth.floorId) floorCorrect++
+    }
+    if (!previous || fix.timestamp - previous.fix.timestamp >= 1000) {
+      if (previous) {
+        const de = (fix.enu.e - previous.fix.enu.e) - (truth.e - previous.truth.e)
+        const dn = (fix.enu.n - previous.fix.enu.n) - (truth.n - previous.truth.n)
+        jitterSum += de * de + dn * dn
+        jitterCount++
+      }
+      previous = { fix, truth }
     }
   }
   const sorted = [...errors].sort((a, b) => a - b)
@@ -167,7 +232,8 @@ export function errorReport(fixes: LocationFix[], path: PathWaypoint[], startTim
     p90M: percentile(0.9),
     maxM: sorted[sorted.length - 1] ?? NaN,
     floorCorrectRate: indoorFixes ? floorCorrect / indoorFixes : NaN,
-    indoorCorrectRate: fixes.length ? indoorCorrect / fixes.length : NaN
+    indoorCorrectRate: fixes.length ? indoorCorrect / fixes.length : NaN,
+    jitterM: jitterCount ? Math.sqrt(jitterSum / jitterCount) : NaN
   }
 }
 
@@ -186,14 +252,19 @@ export async function runSimulation(params: {
   path: PathWaypoint[]
   sim?: Partial<SimOptions>
   ble?: Partial<BleProviderOptions>
+  /** Simulate step + compass tracking too */
+  pdr?: Partial<PdrProviderOptions> | boolean
   fusion?: Partial<FusionOptions>
 }): Promise<SimulationResult> {
-  const options = { ...DEFAULT_SIM, ...params.sim }
+  const options = { ...DEFAULT_SIM, ...params.sim, motion: { ...DEFAULT_SIM.motion, ...params.sim?.motion } }
   const scanner = new MockBleScanner()
   const gpsSource = new MockGpsSource()
+  const motionSource = new MockMotionSource()
   const bleProvider = new BleProvider(scanner, params.ble)
+  const pdr = params.pdr ? new PdrProvider(motionSource, params.pdr === true ? {} : params.pdr) : undefined
   const service = new LocationService({
     providers: [bleProvider, new GpsProvider(gpsSource)],
+    motion: pdr,
     fusion: params.fusion
   })
 
@@ -205,8 +276,11 @@ export async function runSimulation(params: {
   bleProvider.onFix((fix) => ble.push(fix))
   await service.start(params.venue)
 
-  // Replay both streams in time order
+  // Replay every stream in time order
+  const motion = pdr ? generateMotion(params.path, params.venue, options) : { accel: [], compass: [] }
   const timeline = [
+    ...motion.accel.map((sample) => ({ t: sample.timestamp, run: () => motionSource.emitAccel(sample) })),
+    ...motion.compass.map((sample) => ({ t: sample.timestamp, run: () => motionSource.emitCompass(sample) })),
     ...generateAdverts(params.path, params.venue, options).map((advert) => ({ t: advert.timestamp, run: () => scanner.emit(advert) })),
     ...generateGpsReadings(params.path, params.venue, options).map((reading) => ({ t: reading.timestamp, run: () => gpsSource.emit(reading) }))
   ].sort((a, b) => a.t - b.t)

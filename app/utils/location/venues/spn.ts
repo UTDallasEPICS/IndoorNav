@@ -87,6 +87,8 @@ export const spnVenue: VenueConfig = {
   id: 'utd',
   name: 'UT Dallas',
   origin: SPN_ORIGIN,
+  // Richardson, TX (NOAA World Magnetic Model, 2026): ~2.3° east and shrinking ~0.1°/year. Recheck every few years.
+  magneticDeclinationDeg: 2.3,
   buildings: [{ id: 'spn1', name: 'Synergy Park North 1', footprint, floors: [level1, level2] }],
   beacons
 }
