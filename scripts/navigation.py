@@ -1,25 +1,32 @@
 #!/usr/bin/env python3
 """
-A* pathfinding on a grid stored as a text file of 0s (open) and 1s (walls).
+A* pathfinding on a grid stored as a text file of 0s (open) and 1s (walls),
+with a clearance penalty that pulls paths toward the middle of hallways.
 
 Input file : rows of 0/1, either space-separated ("0 1 0") or contiguous ("010").
 Coordinates: (row, col), 0-indexed, origin at the top-left.
 Output file: one "row,col" pair per line, from start to destination.
 
 Usage:
-    python astar_grid.py
+    python navigation.py
 
-Reads SPN.txt and coords.txt (next to this script) and writes the path to
-path.txt. coords.txt holds two lines: start as row,col, then destination as
-row,col. Movement is 8-directional (diagonals allowed,
-no cutting between two diagonally touching walls).
+Reads nav_io/SPN.txt and nav_io/coords.txt (next to this script) and writes the
+path to nav_io/path.txt. coords.txt holds two lines: start as row,col, then
+destination as row,col. Movement is 8-directional (diagonals allowed, no
+cutting between two diagonally touching walls).
 """
 
 import heapq
 import math
 import os
 import sys
-import matplotlib.pyplot as plt
+
+import numpy as np
+
+try:
+    from scipy.ndimage import distance_transform_edt
+except ImportError:  # pure-Python fallback is used instead (slower)
+    distance_transform_edt = None
 
 SQRT2 = math.sqrt(2.0)
 
@@ -29,6 +36,24 @@ COORDS_FILE = os.path.join(BASE_DIR, "nav_io", "coords.txt")
 OUTPUT_FILE = os.path.join(BASE_DIR, "nav_io", "path.txt")
 DIAGONAL = True
 CUT_CORNERS = False
+
+# Hallway centering
+CLEARANCE_RADIUS = 6     # cells; ~half of an 11-wide hallway
+WALL_WEIGHT = 2.0        # penalty strength next to a wall (0 disables centering)
+
+# Heuristic inflation. 1.0 = optimal paths. Values like 1.2-2.0 search much
+# faster (fewer expansions) at the cost of slightly suboptimal paths.
+H_WEIGHT = 1.5
+
+# Straight-line smoothing (any-angle shortcuts applied after A*)
+SMOOTH_PATH = True
+STRAIGHT_MIN_CLEARANCE = 3.0   # a shortcut must stay at least this far from walls
+STRAIGHT_SLACK = 2.0           # a shortcut may cost up to this x the penalised
+                               # cost of the A* stretch it replaces (1.0 = only
+                               # free straightening; higher = straighter lines)
+SMOOTH_FAIL_WINDOW = 25        # stop looking ahead after this many failed shortcuts
+
+SHOW_PLOT = True
 
 
 # --------------------------------------------------------------------------- #
@@ -42,9 +67,12 @@ def load_grid(path):
             line = line.strip()
             if not line:
                 continue
-            tokens = line.split() if (" " in line or "," in line) else list(line)
             if "," in line:
                 tokens = line.replace(",", " ").split()
+            elif " " in line:
+                tokens = line.split()
+            else:
+                tokens = list(line)
             try:
                 row = [int(t) for t in tokens]
             except ValueError:
@@ -62,103 +90,232 @@ def load_grid(path):
 
 
 # --------------------------------------------------------------------------- #
+# Clearance (distance to nearest wall)
+# --------------------------------------------------------------------------- #
+def _chamfer_clearance(wall, H, W):
+    """Pure-Python 8-way chamfer distance on a padded flat grid (fallback)."""
+    INF = 1e9
+    d = [0.0 if w else INF for w in wall]
+    for r in range(1, H - 1):
+        base = r * W
+        for i in range(base + 1, base + W - 1):
+            if wall[i]:
+                continue
+            best = d[i]
+            v = d[i - 1] + 1.0
+            if v < best: best = v
+            v = d[i - W] + 1.0
+            if v < best: best = v
+            v = d[i - W - 1] + SQRT2
+            if v < best: best = v
+            v = d[i - W + 1] + SQRT2
+            if v < best: best = v
+            d[i] = best
+    for r in range(H - 2, 0, -1):
+        base = r * W
+        for i in range(base + W - 2, base, -1):
+            if wall[i]:
+                continue
+            best = d[i]
+            v = d[i + 1] + 1.0
+            if v < best: best = v
+            v = d[i + W] + 1.0
+            if v < best: best = v
+            v = d[i + W + 1] + SQRT2
+            if v < best: best = v
+            v = d[i + W - 1] + SQRT2
+            if v < best: best = v
+            d[i] = best
+    return d
+
+
+def clearance(padded):
+    """Distance from every cell of a padded grid to the nearest wall (border = wall)."""
+    H, W = padded.shape
+    if distance_transform_edt is not None:
+        return distance_transform_edt(padded == 0)
+    flat = padded.ravel().tolist()
+    return np.array(_chamfer_clearance(flat, H, W)).reshape(H, W)
+
+
+def step_multipliers(dist):
+    """
+    Per-cell cost multiplier (>= 1.0) from the clearance map: 1.0 at/after
+    CLEARANCE_RADIUS from any wall, rising quadratically to 1 + WALL_WEIGHT
+    right next to a wall.
+    """
+    if WALL_WEIGHT <= 0 or CLEARANCE_RADIUS <= 0:
+        return np.ones_like(dist)
+    t = np.clip((CLEARANCE_RADIUS - dist) / CLEARANCE_RADIUS, 0.0, 1.0)
+    return 1.0 + WALL_WEIGHT * t * t
+
+
+def straighten(pts, dist, mult, wall, cut_corners):
+    """
+    Greedy any-angle shortcutting ("string pulling") of an 8-connected path.
+
+    pts: (n, 2) int array of padded (row, col). A shortcut from a to b is taken
+    when the straight (DDA) line between them
+      * stays >= STRAIGHT_MIN_CLEARANCE from every wall (relaxed to the
+        endpoints' own clearance if they are already closer),
+      * does not squeeze diagonally between two walls, and
+      * costs <= STRAIGHT_SLACK x the penalised cost of the stretch it replaces.
+    Returns the straightened path rasterised back to contiguous cells.
+    """
+    n = len(pts)
+    if n < 3:
+        return pts
+
+    # cumulative penalised cost along the A* path
+    d = np.diff(pts, axis=0)
+    lens = np.where((d[:, 0] != 0) & (d[:, 1] != 0), SQRT2, 1.0)
+    cum = np.concatenate(([0.0], np.cumsum(lens * mult[pts[1:, 0], pts[1:, 1]])))
+
+    def line(a, b):
+        r0, c0 = pts[a]
+        r1, c1 = pts[b]
+        m = max(abs(r1 - r0), abs(c1 - c0))
+        t = np.arange(m + 1) / m
+        return (np.rint(r0 + (r1 - r0) * t).astype(np.intp),
+                np.rint(c0 + (c1 - c0) * t).astype(np.intp))
+
+    def visible(a, b):
+        rs, cs = line(a, b)
+        thr = min(STRAIGHT_MIN_CLEARANCE, dist[rs[0], cs[0]], dist[rs[-1], cs[-1]])
+        if dist[rs, cs].min() < thr:
+            return False
+        dr = rs[1:] - rs[:-1]
+        dc = cs[1:] - cs[:-1]
+        diag = (dr != 0) & (dc != 0)
+        if not cut_corners and diag.any():
+            if wall[rs[:-1][diag], cs[1:][diag]].any() or wall[rs[1:][diag], cs[:-1][diag]].any():
+                return False
+        chord = (np.where(diag, SQRT2, 1.0) * mult[rs[1:], cs[1:]]).sum()
+        return chord <= STRAIGHT_SLACK * (cum[b] - cum[a])
+
+    keep = [0]
+    anchor = 0
+    while anchor < n - 1:
+        best = anchor + 1
+        fails = 0
+        j = anchor + 2
+        while j < n and fails < SMOOTH_FAIL_WINDOW:
+            if visible(anchor, j):
+                best, fails = j, 0
+            else:
+                fails += 1
+            j += 1
+        keep.append(best)
+        anchor = best
+
+    # rasterise the chords back into a contiguous cell path
+    out_r, out_c = [pts[0, 0:1]], [pts[0, 1:2]]
+    for a, b in zip(keep[:-1], keep[1:]):
+        rs, cs = line(a, b)
+        out_r.append(rs[1:])
+        out_c.append(cs[1:])
+    return np.stack((np.concatenate(out_r), np.concatenate(out_c)), axis=1)
+
+
+# --------------------------------------------------------------------------- #
 # A*
 # --------------------------------------------------------------------------- #
-def astar(grid, start, goal, diagonal=DIAGONAL, cut_corners=CUT_CORNERS):
+def astar(grid, start, goal, diagonal=DIAGONAL, cut_corners=CUT_CORNERS,
+          smooth=SMOOTH_PATH):
     """
     Return the list of (row, col) from start to goal, or None if unreachable.
 
-    Efficiency notes:
-      * The grid is flattened to a single list, and cells are addressed by an
-        integer index, so there is no tuple hashing in the hot loop.
-      * Open set is a binary heap; closed set and g-scores are flat arrays.
-      * Stale heap entries are skipped (lazy deletion) instead of using
-        decrease-key.
-      * Heuristic is consistent (Manhattan for 4-way, octile for 8-way), so
-        the first time a node is popped its path is optimal.
-      * Ties on f are broken in favour of larger g (closer to goal), which
-        greatly reduces expansions on open grids.
-      * By default a diagonal move needs both adjacent orthogonal cells open.
-        With cut_corners=True it only needs the diagonal target cell open.
+    Performance notes:
+      * The grid is padded with a 1-cell wall border and flattened, so every
+        neighbour is just `cur + offset` with no bounds checks.
+      * Walls are pre-marked in the `closed` bytearray, so a single lookup
+        rejects both walls and already-expanded cells.
+      * Heuristic values and wall-clearance multipliers are computed once with
+        vectorised numpy (SciPy EDT when available) and stored in flat lists.
+      * Open set is a binary heap with lazy deletion; ties on f favour larger g.
+      * After the search, straighten() replaces curved stretches with straight
+        any-angle segments when they stay clear of walls (see constants).
+      * The heuristic (octile / Manhattan) never overestimates because every
+        step multiplier is >= 1, so with H_WEIGHT = 1 paths remain optimal for
+        the penalised cost.
     """
-    rows, cols = len(grid), len(grid[0])
-    flat = [cell for row in grid for cell in row]  # 0 open, 1 wall
-    size = rows * cols
+    arr = np.asarray(grid, dtype=np.uint8)
+    rows, cols = arr.shape
+    padded = np.pad(arr, 1, constant_values=1)
+    H, W = padded.shape
 
-    s = start[0] * cols + start[1]
-    g_idx = goal[0] * cols + goal[1]
-    gr, gc = goal
+    wall = bytearray(padded.ravel().tobytes())      # 1 = wall (never modified)
+    closed = bytearray(wall)                        # walls start as "closed"
+    dist = clearance(padded)
+    mult_arr = step_multipliers(dist)
+    mult = mult_arr.ravel().tolist()
+
+    s = (start[0] + 1) * W + start[1] + 1
+    goal_idx = (goal[0] + 1) * W + goal[1] + 1
+
+    # Vectorised heuristic over the whole padded grid
+    rr, cc = np.indices((H, W))
+    dr = np.abs(rr - (goal[0] + 1))
+    dc = np.abs(cc - (goal[1] + 1))
+    if diagonal:
+        hv = (dr + dc) + (SQRT2 - 2.0) * np.minimum(dr, dc)
+    else:
+        hv = dr + dc
+    h = (hv * H_WEIGHT).ravel().tolist()
 
     INF = float("inf")
-    g_score = [INF] * size
-    parent = [-1] * size
-    closed = bytearray(size)
-
-    def h(idx):
-        dr = abs(idx // cols - gr)
-        dc = abs(idx % cols - gc)
-        if diagonal:
-            return (dr + dc) + (SQRT2 - 2.0) * min(dr, dc)
-        return dr + dc
-
+    g_score = [INF] * (H * W)
+    parent = [-1] * (H * W)
     g_score[s] = 0.0
-    # heap entries: (f, -g, index)
-    heap = [(h(s), 0.0, s)]
+
+    orth = (-W, W, -1, 1)
+    diag = ((-W - 1, -W, -1), (-W + 1, -W, 1), (W - 1, W, -1), (W + 1, W, 1))
+
+    heappush = heapq.heappush
+    heappop = heapq.heappop
+    heap = [(h[s], 0.0, s)]
 
     while heap:
-        _, neg_g, cur = heapq.heappop(heap)
+        cur = heappop(heap)[2]
         if closed[cur]:
             continue
         closed[cur] = 1
 
-        if cur == g_idx:
-            path = []
+        if cur == goal_idx:
+            idx = []
             while cur != -1:
-                path.append((cur // cols, cur % cols))
+                idx.append(cur)
                 cur = parent[cur]
-            path.reverse()
-            return path
+            idx.reverse()
+            pts = np.array([divmod(i, W) for i in idx], dtype=np.intp)
+            if smooth and diagonal:
+                pts = straighten(pts, dist, mult_arr, padded, cut_corners)
+            return [(int(r) - 1, int(c) - 1) for r, c in pts]
 
         g_cur = g_score[cur]
-        r, c = divmod(cur, cols)
 
-        # 4-connected neighbours
-        up = r > 0
-        down = r < rows - 1
-        left = c > 0
-        right = c < cols - 1
-
-        neighbours = []
-        if up:
-            neighbours.append((cur - cols, 1.0))
-        if down:
-            neighbours.append((cur + cols, 1.0))
-        if left:
-            neighbours.append((cur - 1, 1.0))
-        if right:
-            neighbours.append((cur + 1, 1.0))
+        for off in orth:
+            nxt = cur + off
+            if closed[nxt]:
+                continue
+            t = g_cur + mult[nxt]
+            if t < g_score[nxt]:
+                g_score[nxt] = t
+                parent[nxt] = cur
+                heappush(heap, (t + h[nxt], -t, nxt))
 
         if diagonal:
-            # diagonal moves; by default both orthogonal neighbours must be open
-            def ok(a, b):
-                return (not flat[a] and not flat[b]) if not cut_corners else True
-            if up and left and ok(cur - cols, cur - 1):
-                neighbours.append((cur - cols - 1, SQRT2))
-            if up and right and ok(cur - cols, cur + 1):
-                neighbours.append((cur - cols + 1, SQRT2))
-            if down and left and ok(cur + cols, cur - 1):
-                neighbours.append((cur + cols - 1, SQRT2))
-            if down and right and ok(cur + cols, cur + 1):
-                neighbours.append((cur + cols + 1, SQRT2))
-
-        for nxt, cost in neighbours:
-            if flat[nxt] or closed[nxt]:
-                continue
-            tentative = g_cur + cost
-            if tentative < g_score[nxt]:
-                g_score[nxt] = tentative
-                parent[nxt] = cur
-                heapq.heappush(heap, (tentative + h(nxt), -tentative, nxt))
+            for off, a, b in diag:
+                nxt = cur + off
+                if closed[nxt]:
+                    continue
+                if not cut_corners and (wall[cur + a] or wall[cur + b]):
+                    continue
+                t = g_cur + SQRT2 * mult[nxt]
+                if t < g_score[nxt]:
+                    g_score[nxt] = t
+                    parent[nxt] = cur
+                    heappush(heap, (t + h[nxt], -t, nxt))
 
     return None
 
@@ -212,19 +369,21 @@ def main():
     start, goal = load_coords(COORDS_FILE, grid)
     print(f"Start: {start}  Destination: {goal}")
 
-    path = astar(grid, start, goal, diagonal=DIAGONAL, cut_corners=CUT_CORNERS)
+    path = astar(grid, start, goal)
     if path is None:
         sys.exit("No path exists between the start and destination.")
 
     with open(OUTPUT_FILE, "w") as f:
-        for r, c in path:
-            f.write(f"{r},{c}\n")
-            grid[r][c] = 2
-
+        f.write("".join(f"{r},{c}\n" for r, c in path))
     print(f"Path found: {len(path)} cells. Written to {OUTPUT_FILE}")
 
-    plt.matshow(grid)
-    plt.show()
+    if SHOW_PLOT:
+        import matplotlib.pyplot as plt  # lazy import: slow, only needed here
+        for r, c in path:
+            grid[r][c] = 2
+        plt.matshow(grid)
+        plt.show()
+
 
 if __name__ == "__main__":
     main()
