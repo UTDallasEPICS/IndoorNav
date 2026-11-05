@@ -1,0 +1,46 @@
+{
+  "beacon_uuids" : [
+
+  ],
+  "building" : "SPN",
+  "eddystone_filters" : [
+    "A023919CD30A4E79BBD9"
+  ],
+  "exported_at" : "2026-10-31T01:57:17.961Z",
+  "floor" : "2",
+  "floorplan_image" : "9DBAA8A3-B443-42C9-8C04-2F7566012AAF-1793233937.png",
+  "geo" : {
+    "origin_latitude" : 32.993386000000001,
+    "origin_longitude" : -96.751969000000003,
+    "x_axis_bearing_deg" : 89.810000000000002
+  },
+  "group_virtual_beacons" : true,
+  "image_height_px" : 2512,
+  "image_width_px" : 3882,
+  "name" : "SPN 2",
+  "origin_pixel" : [
+    0,
+    2512
+  ],
+  "path_loss" : {
+    "fixed_exponent" : null,
+    "height_offset_m" : 1.5
+  },
+  "pixels_per_meter" : 28.470803873550622,
+  "project_id" : "9DBAA8A3-B443-42C9-8C04-2F7566012AAF",
+  "world" : {
+    "formula" : "world = origin + R(rotation_deg) * local * units_per_meter",
+    "origin" : [
+      0,
+      0
+    ],
+    "rotation_deg" : 0,
+    "unit" : "m",
+    "units_per_meter" : 1
+  },
+  "x_axis_pixel" : [
+    3882,
+    2512
+  ],
+  "y_axis" : "counterclockwise_from_x (cartesian)"
+}

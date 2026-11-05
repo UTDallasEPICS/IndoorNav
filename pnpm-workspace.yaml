@@ -1,0 +1,9 @@
+packages:
+  - .
+
+# Flat node_modules so Capacitor's generated native configs reference
+# node_modules/<pkg> instead of versioned .pnpm/ store paths.
+nodeLinker: hoisted
+
+allowBuilds:
+  esbuild: true

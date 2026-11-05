@@ -5,11 +5,12 @@ Usage:
   dwg2dxf -y -o cad-source/SPN-level-1.dxf cad-source/SPN-level-1.dwg
   python3 scripts/cad-to-svg.py cad-source/SPN-level-1.dxf \
       public/maps/spn-level1.svg public/maps/spn-level1-rooms.json
+  (same for level 2, with spn-level2.*)
 """
 import json
 import sys
 
-from ezdxf import bbox, recover
+from ezdxf import bbox, path, recover
 from ezdxf.addons.drawing import Frontend, RenderContext, config, layout, svg
 
 # Only these layers end up in the map; dimensions, furniture, square-footage
@@ -26,6 +27,11 @@ KEEP_LAYERS = {
     "A-SHAFT",
     "A-STAIR",
     "A-DOOR",
+    # Level 2 names its layers differently
+    "A-EXST",  # exterior walls, columns, atrium edge
+    "A-STAIRS",
+    "A-FLOR",
+    "A-GLAZ-CWMG",  # curtain wall
     "A-ROOM NAME",
     "A-ROOM NUMBER",
 }
@@ -66,7 +72,49 @@ def find_rooms(msp):
     for room in rooms:
         # Top line first
         room["name"] = " ".join(text for _, text in sorted(room.pop("names"), reverse=True))
+
+    add_outlines(msp, rooms)
     return rooms
+
+
+def contains(polygon, x, y):
+    """Ray casting: is (x, y) inside the polygon (a list of (x, y) points)?"""
+    inside = False
+    for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1]):
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def area_of(polygon):
+    return abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1]))) / 2
+
+
+def add_outlines(msp, rooms):
+    """Gives each room its boundary from the A-SQ FOOTAGE layer (the area outlines).
+
+    A room gets the smallest outline around its number label. An outline that
+    holds labels of different rooms is ambiguous (labels sometimes sit in a
+    neighbouring room), so none of those rooms get it rather than a wrong one.
+    """
+    outlines = [
+        [(v.x, v.y) for v in path.make_path(e).flattening(1)]  # 1 inch: smooth enough for curved walls
+        for e in msp.query('LWPOLYLINE[layer=="A-SQ FOOTAGE"]')
+        if e.closed
+    ]
+
+    for room in rooms:
+        around = [o for o in outlines if contains(o, room["x"], room["y"])]
+        room["outline"] = min(around, key=area_of) if around else None
+
+    # Count first, then clear, so clearing one room doesn't hide it from the next check
+    numbers_in = {}  # id(outline) -> room numbers whose label is inside it
+    for room in rooms:
+        if room["outline"]:
+            numbers_in.setdefault(id(room["outline"]), set()).add(room["number"])
+    for room in rooms:
+        if room["outline"] and len(numbers_in[id(room["outline"])]) > 1:
+            room["outline"] = None
 
 
 def main(src, svg_dst, rooms_dst=None):
@@ -92,12 +140,20 @@ def main(src, svg_dst, rooms_dst=None):
     if rooms_dst:
         # Store positions as fractions (0–1) of the SVG's width and height,
         # measured from its top-left corner (CAD y points up, SVG y points down).
+        def to_fraction(x, y):
+            return (
+                round((x - content.extmin.x) / content.size.x, 5),
+                round((content.extmax.y - y) / content.size.y, 5),
+            )
+
         rooms = []
         for room in find_rooms(msp):
-            fx = (room["x"] - content.extmin.x) / content.size.x
-            fy = (content.extmax.y - room["y"]) / content.size.y
+            fx, fy = to_fraction(room["x"], room["y"])
             if 0 <= fx <= 1 and 0 <= fy <= 1:
-                rooms.append({**room, "x": round(fx, 5), "y": round(fy, 5)})
+                outline = room.pop("outline")
+                if outline:
+                    room["outline"] = [list(to_fraction(x, y)) for x, y in outline]  # [[x, y], ...]
+                rooms.append({**room, "x": fx, "y": fy})
         rooms.sort(key=lambda r: r["number"])
         with open(rooms_dst, "wt") as f:
             json.dump(rooms, f, indent=1)
