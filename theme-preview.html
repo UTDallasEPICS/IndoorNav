@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Indoor Nav Color Themes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Iceberg&family=Paytone+One&family=Anton&family=Outfit:wght@500;700&family=Jost:wght@500;600&display=swap">
+<style>
+/* Layout: a header that explains the two color roles, then a wrapping grid of phone mockups, one per theme */
+:root {
+  /* Page chrome */
+  --bg: #f1f1f4;
+  --fg: #1c1c1e;
+  --muted: #6e6e76;
+  --line: #d7d7de;
+  --card: #ffffff;
+  --chip: #e6e6ec;
+  /* App tokens (match app/assets/css/main.css; the mockup itself is always the light app) */
+  --app-surface: #ffffff;
+  --app-text: #1c1c1e;
+  --app-muted: #8e8e93;
+  --app-border: #d1d1d6;
+  --app-map-bg: #f4f4f6;
+  --app-room: #ffffff;
+  --app-wall: #b9b9c1;
+  --app-label: #9a9aa2;
+  --bezel: #1c1c1e;
+  /* Type */
+  --font-brand: 'Iceberg', system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141416; --fg: #f2f2f5; --muted: #a0a0aa; --line: #2e2e34; --card: #1e1e22; --chip: #2a2a30; --bezel: #000000;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141416; --fg: #f2f2f5; --muted: #a0a0aa; --line: #2e2e34; --card: #1e1e22; --chip: #2a2a30; --bezel: #000000;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 56px;
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+
+header { display: flex; flex-direction: column; gap: 14px; }
+h1 { margin: 0; font-family: var(--font-brand); font-weight: 400; font-size: clamp(28px, 5vw, 40px); text-wrap: balance; }
+.lede { margin: 0; max-width: 64ch; color: var(--muted); font-size: 15px; line-height: 1.55; }
+.roles { display: flex; flex-wrap: wrap; gap: 10px 24px; font-size: 14px; }
+.role { display: flex; align-items: center; gap: 8px; }
+.role b { font-weight: 600; }
+.role .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--fg); }
+.role .dot.accent { background: transparent; border: 3px solid var(--fg); }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.seg { display: inline-flex; padding: 4px; gap: 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); }
+.seg button {
+  border: none; background: transparent; color: var(--fg); font: inherit; font-size: 14px; font-weight: 600;
+  padding: 8px 14px; border-radius: 999px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.seg button:focus-visible, .copy:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.toolbar .note { color: var(--muted); font-size: 13px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 32px 24px; }
+
+.theme { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.theme-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.theme-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.theme-head .num { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.swatches { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.from { margin: -8px 0 0; color: var(--muted); font-size: 12px; }
+.swatch {
+  min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px;
+  border-radius: 10px; background: var(--chip); font-size: 12px;
+}
+.swatch i { width: 22px; height: 22px; border-radius: 6px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12); }
+.swatch span { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.swatch small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+.swatch code { font-family: var(--font-mono); font-size: 12px; }
+.copy {
+  align-self: flex-start; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  font: inherit; font-size: 13px; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer;
+}
+.copy:hover { border-color: var(--muted); }
+
+/* ---------- Phone mockup ---------- */
+.phone {
+  width: 100%; max-width: 280px; aspect-ratio: 9 / 19; margin: 0 auto;
+  border: 8px solid var(--bezel); border-radius: 36px; overflow: hidden; position: relative;
+  background: var(--app-surface); box-shadow: 0 10px 30px rgba(0,0,0,0.14);
+  font-family: var(--font-body); color: var(--app-text);
+}
+.screen { position: absolute; inset: 0; background: var(--app-surface); }
+.real-map { /* the real floor plan, zoomed so the lobby → Fab Lab route fills the space above the sheet */
+  position: absolute; width: 560%; aspect-ratio: 1000000 / 457867; max-width: none;
+  left: -245.1%; /* centres map x 0.527 on the screen */
+  top: -3.6%; /* route clears the floor switcher; your arrow sits just above the sheet */
+}
+.real-map img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; max-width: none; }
+.map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+.map .route, .map .dest-room, .map .accuracy { vector-effect: non-scaling-stroke; }
+.map .room { fill: var(--app-room); stroke: var(--app-wall); stroke-width: 1.2; }
+.map .hall { fill: var(--app-map-bg); }
+.map .label { fill: var(--app-label); font-size: 7px; font-family: var(--font-body); font-weight: 600; }
+.map .dest-room { fill: var(--room-fill, var(--accent-soft)); stroke: var(--pin, var(--accent)); stroke-width: 2; }
+.map .route { fill: none; stroke: var(--accent); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.map .accuracy { fill: var(--solid-soft); stroke: var(--solid); stroke-width: 1.5; }
+.map .me { fill: none; stroke: var(--solid); stroke-width: 2.2; stroke-linejoin: round; }
+.map .pin { fill: var(--pin, var(--accent)); }
+.map .pin-dot { fill: #ffffff; }
+.map .start-head { fill: var(--solid); }
+.map .start-needle { stroke: var(--app-muted); stroke-width: 2; stroke-linecap: round; }
+.map .start-shine { fill: #ffffff; opacity: 0.6; }
+.pick-only { display: none; }
+.picking .pick-only { display: inline; }
+.picking .nav-only { display: none; }
+
+.floor-toggle {
+  position: absolute; top: 34px; right: 12px; display: flex; gap: 3px; padding: 3px;
+  border: 1px solid var(--app-border); border-radius: 999px; background: var(--app-surface);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+}
+.floor-toggle span {
+  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+}
+.floor-toggle .on { background: var(--toggle, var(--solid)); color: var(--on-toggle, var(--on-solid)); }
+
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 16px 18px;
+  background: var(--sheet, var(--app-surface)); border-radius: 18px 18px 0 0; box-shadow: 0 -2px 16px rgba(0,0,0,0.08);
+  display: flex; flex-direction: column; color: var(--ink, var(--app-text));
+}
+.sheet-head h3, .btn { font-family: var(--display, var(--font-body)); } /* themes with their own heading font */
+.controls { position: absolute; bottom: calc(100% + 12px); display: flex; flex-direction: column; gap: 9px; }
+.controls.right { right: 12px; }
+.controls.left { left: 12px; }
+.ctl {
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--app-surface); border: 1px solid var(--app-border); box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+}
+.picking .controls.left .ctl { background: var(--solid-soft); }
+.ctl svg { width: 16px; height: 16px; fill: none; stroke: var(--app-text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.sheet-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.tag { font-size: 14px; font-weight: 700; color: var(--solid-text); }
+.hint { margin: 4px 0 10px; color: var(--app-muted); font-size: 11.5px; line-height: 1.4; }
+.hint a { color: var(--accent-text); font-weight: 600; text-decoration: none; }
+.input {
+  font-size: 13px; padding: 6px 0; margin-bottom: 12px; border-bottom: 1.5px solid var(--accent);
+}
+.btn {
+  height: 40px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--solid); color: var(--on-solid); font-size: 13.5px; font-weight: 600;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .copy, .seg button { transition: background-color 0.15s ease, border-color 0.15s ease; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Indoor Nav color themes</h1>
+    <p class="lede">Twelve two-color themes for the SPN map screen. Each phone uses the same layout as <code>app/pages/map.vue</code>; only the two colors change. Text on the solid color switches between white and near-black, whichever is easier to read.</p>
+    <div class="roles">
+      <span class="role"><span class="dot"></span><span><b>Solid</b>: Find Route button, active floor, your arrow, set-location pin</span></span>
+      <span class="role"><span class="dot accent"></span><span><b>Accent</b>: route line, destination pin and room, links, input underline</span></span>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="seg" role="group" aria-label="Screen to preview">
+      <button id="mode-nav" type="button" aria-pressed="true" data-mode="nav">Enter Destination</button>
+      <button id="mode-pick" type="button" aria-pressed="false" data-mode="pick">Set Your Location</button>
+    </div>
+    <span class="note">Real SPN Level 1 floor plan with an A* route from the main lobby to 1.110 Fabrication Lab.</span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<template id="phone-tpl">
+  <div class="phone">
+    <div class="screen">
+      <div class="real-map">
+        <img src="public/maps/spn-level1.svg" alt="SPN Level 1 floor plan" draggable="false"> <!-- same file the app loads -->
+        <!-- Overlay in map units: x 0–1000, y 0–457.867 (the SVG's own aspect), so circles stay round -->
+        <svg class="map" viewBox="0 0 1000 457.867" aria-hidden="true">
+          <polygon class="dest-room nav-only" points="579.4,103.1 579.4,69.0 454.8,69.0 454.8,102.7 508.8,102.7 508.8,99.5 516.3,99.5 516.3,102.7 550.0,102.7 550.0,103.1" /> <!-- 1.110 outline from spn-level1-rooms.json -->
+          <polyline class="route nav-only" points="505.2,244.7 505.2,207.9 465.1,167.4 459.0,167.4 459.0,144.1 468.7,134.3 468.7,127.0 451.7,104.9 451.7,65.6 591.4,65.6 598.7,61.9 601.2,70.6 568.3,71.7 562.3,77.9 525.8,77.9 516.1,87.7" /> <!-- A* on public/data/SPN.txt, lobby → 1.110 -->
+          <circle class="accuracy nav-only" cx="505.2" cy="244.7" r="10" />
+          <polygon class="me nav-only" transform="translate(496.4 235.9) scale(0.73)" points="12 2 19 21 12 17 5 21 12 2" /> <!-- AppLogo arrow -->
+          <g class="nav-only" transform="translate(508.6 67.7) scale(0.625)"> <!-- pin tip on the room point -->
+            <path class="pin" d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20C24 5.4 18.6 0 12 0z" />
+            <circle class="pin-dot" cx="12" cy="12" r="4.5" />
+          </g>
+          <g class="pick-only" transform="translate(496.4 219.2) scale(0.73)"> <!-- set-location push-pin, needle on the lobby -->
+            <line class="start-needle" x1="12" y1="16" x2="12" y2="35" />
+            <circle class="start-head" cx="12" cy="10" r="9" />
+            <circle class="start-shine" cx="8.5" cy="6.5" r="2.5" />
+          </g>
+        </svg>
+      </div>
+
+      <div class="floor-toggle" aria-hidden="true"><span class="on">1</span><span>2</span></div>
+
+      <div class="sheet">
+        <div class="controls left">
+          <span class="ctl"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="5" /><path d="M12 13v9" /></svg></span>
+        </div>
+        <div class="controls right">
+          <span class="ctl"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg></span>
+          <span class="ctl"><svg viewBox="0 0 24 24"><path d="M5 12h14" /></svg></span>
+          <span class="ctl"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><polygon points="15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5 15.5 8.5" /></svg></span>
+        </div>
+
+        <div class="sheet-head">
+          <h3><span class="nav-only">Enter Destination</span><span class="pick-only">Set Your Location</span></h3>
+          <span class="tag nav-only">SPN</span>
+        </div>
+        <p class="hint">
+          <span class="nav-only">Starting from your current location.</span>
+          <span class="pick-only">Move the map so the marker is where you are. <a>Cancel</a></span>
+        </p>
+        <div class="input nav-only">1.110 Fabrication Lab</div>
+        <div class="btn"><span class="nav-only">Find Route</span><span class="pick-only">Confirm Location</span></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+const THEMES = [
+  { name: 'Comet',        solid: '#E87500', accent: '#154734' },
+  { name: 'Vermilion',    solid: '#FA4D01', accent: '#2B3A67' },
+  { name: 'Soft Orange',  solid: '#FB7A41', accent: '#1F6F78' },
+  { name: 'Olive Grove',  solid: '#57612F', accent: '#D9A441' },
+  { name: 'Harbor',       solid: '#1F5F8B', accent: '#F2A541' },
+  { name: 'Teal Signal',  solid: '#0F766E', accent: '#F26B5B' },
+  { name: 'Cobalt',       solid: '#2747D9', accent: '#E8A800' },
+  { name: 'Forest',       solid: '#2F5D3A', accent: '#E07A5F' },
+  // From your reference images. Optional extras: pin (destination pin + room outline), roomFill, toggle (active floor),
+  // sheet (bottom sheet background), ink (sheet text), display (heading + button font)
+  { name: 'Taxi Day', from: 'Paytone One palette', solid: '#193948', accent: '#4FADC0',
+    pin: '#E76268', toggle: '#FCDC73', sheet: '#FFF6DA', ink: '#193948', display: "'Paytone One', system-ui, sans-serif" },
+  { name: 'Sweet Sunday', from: 'Linen, Tangelo, Chocolate, Botticelli', solid: '#FB4D00', accent: '#49261D',
+    pin: '#FB4D00', roomFill: '#CAE7F7', toggle: '#49261D', sheet: '#FFEDE3', ink: '#49261D', display: "'Anton', Impact, sans-serif" },
+  { name: 'Serenade', from: 'Vermilion & Serenade', solid: '#FA4D01', accent: '#FA4D01',
+    sheet: '#FFEDE3', ink: '#5A2A12', display: "'Outfit', system-ui, sans-serif" },
+  { name: 'Sunset Route', from: 'Dribbble route app (from a photo)', solid: '#F0973A', accent: '#3A4FC8',
+    pin: '#E66A2C', roomFill: '#FCE3B8', sheet: '#FFF8EC', ink: '#2B2B33', display: "'Jost', system-ui, sans-serif" }
+];
+
+function lum(hex) { // relative luminance (WCAG)
+  const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+function contrast(a, b) { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); }
+function onColor(hex) { return contrast(hex, '#FFFFFF') >= contrast(hex, '#1C1C1E') ? '#FFFFFF' : '#1C1C1E'; }
+function textSafe(hex) { // darken a light color until it reads on white, for small text like links
+  let [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  let out = hex;
+  while (contrast(out, '#FFFFFF') < 3.2) {
+    r = Math.round(r * 0.9); g = Math.round(g * 0.9); b = Math.round(b * 0.9);
+    out = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+  return out;
+}
+
+const grid = document.getElementById('grid');
+const tpl = document.getElementById('phone-tpl');
+
+THEMES.forEach((t, i) => {
+  const onSolid = onColor(t.solid);
+  const card = document.createElement('article');
+  card.className = 'theme';
+  card.style.setProperty('--solid', t.solid);
+  card.style.setProperty('--accent', t.accent);
+  card.style.setProperty('--on-solid', onSolid);
+  card.style.setProperty('--solid-soft', `color-mix(in srgb, ${t.solid} 25%, transparent)`);
+  card.style.setProperty('--accent-soft', `color-mix(in srgb, ${t.accent} 28%, transparent)`);
+  card.style.setProperty('--solid-text', textSafe(t.solid));
+  card.style.setProperty('--accent-text', textSafe(t.accent));
+  if (t.pin) card.style.setProperty('--pin', t.pin);
+  if (t.roomFill) card.style.setProperty('--room-fill', `color-mix(in srgb, ${t.roomFill} 75%, transparent)`);
+  if (t.toggle) { card.style.setProperty('--toggle', t.toggle); card.style.setProperty('--on-toggle', onColor(t.toggle)); }
+  if (t.sheet) card.style.setProperty('--sheet', t.sheet);
+  if (t.ink) card.style.setProperty('--ink', t.ink);
+  if (t.display) card.style.setProperty('--display', t.display);
+
+  const head = document.createElement('div');
+  head.className = 'theme-head';
+  head.innerHTML = `<h2>${t.name}</h2><span class="num">${String(i + 1).padStart(2, '0')} / ${THEMES.length}</span>`;
+  const from = document.createElement('p');
+  from.className = 'from';
+  from.textContent = t.from ? `From: ${t.from}` : '';
+  from.hidden = !t.from;
+
+  const roles = [['Solid', t.solid], ['Accent', t.accent], ['Pin', t.pin], ['Room', t.roomFill],
+    ['Floor', t.toggle], ['Sheet', t.sheet], ['Text', t.ink]].filter(([, v]) => v);
+  const sw = document.createElement('div');
+  sw.className = 'swatches';
+  sw.innerHTML = roles.map(([label, v]) =>
+    `<div class="swatch"><i style="background:${v}"></i><span><small>${label}</small><code>${v}</code></span></div>`).join('');
+
+  const css = [`--color-primary: ${t.solid.toLowerCase()};`, `--color-on-primary: ${onSolid.toLowerCase()};`,
+    `--color-accent: ${t.accent.toLowerCase()};`,
+    t.pin && `--color-destination: ${t.pin.toLowerCase()};`,
+    t.sheet && `--color-surface: ${t.sheet.toLowerCase()};`,
+    t.ink && `--color-text: ${t.ink.toLowerCase()};`].filter(Boolean).join('\n');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'copy';
+  btn.id = `copy-${i}`;
+  btn.textContent = 'Copy CSS';
+  btn.addEventListener('click', () => {
+    const done = () => { btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy CSS'; }, 1500); };
+    try {
+      navigator.clipboard.writeText(css).then(done, () => { btn.textContent = 'Copy failed'; });
+    } catch (e) { btn.textContent = 'Copy failed'; }
+  });
+
+  card.append(head, from, tpl.content.cloneNode(true), sw, btn);
+  grid.append(card);
+});
+
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  grid.classList.toggle('picking', b.dataset.mode === 'pick');
+}));
+</script>
+</body>
+</html>
