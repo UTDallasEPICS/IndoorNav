@@ -8,10 +8,12 @@ Coordinates: (row, col), 0-indexed, origin at the top-left.
 Output file: one "row,col" pair per line, from start to destination.
 
 Usage:
-    python navigation.py
+    pip install -r scripts/requirements.txt
+    python scripts/navigation.py [--plot]
 
-Reads nav_io/SPN.txt and nav_io/coords.txt (next to this script) and writes the
-path to nav_io/path.txt. coords.txt holds two lines: start as row,col, then
+Reads public/data/SPN.txt (the level 1 grid the app routes on) and
+nav_io/coords.txt (next to this script) and writes the path to
+nav_io/path.txt. --plot shows the path on the grid (needs matplotlib). coords.txt holds two lines: start as row,col, then
 destination as row,col. Movement is 8-directional (diagonals allowed, no
 cutting between two diagonally touching walls).
 """
@@ -31,7 +33,7 @@ except ImportError:  # pure-Python fallback is used instead (slower)
 SQRT2 = math.sqrt(2.0)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FILE = os.path.join(BASE_DIR, "nav_io", "SPN.txt")
+INPUT_FILE = os.path.join(BASE_DIR, "..", "public", "data", "SPN.txt")  # the same grid the app routes on
 COORDS_FILE = os.path.join(BASE_DIR, "nav_io", "coords.txt")
 OUTPUT_FILE = os.path.join(BASE_DIR, "nav_io", "path.txt")
 DIAGONAL = True
@@ -53,7 +55,7 @@ STRAIGHT_SLACK = 2.0           # a shortcut may cost up to this x the penalised
                                # free straightening; higher = straighter lines)
 SMOOTH_FAIL_WINDOW = 25        # stop looking ahead after this many failed shortcuts
 
-SHOW_PLOT = True
+SHOW_PLOT = "--plot" in sys.argv[1:]  # off by default so the script runs without matplotlib or a window
 
 
 # --------------------------------------------------------------------------- #
