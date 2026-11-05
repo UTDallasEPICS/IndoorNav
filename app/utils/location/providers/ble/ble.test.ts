@@ -157,6 +157,30 @@ describe('BleProvider', () => {
     expect(Math.hypot(last.enu.e - stand.e, last.enu.n - stand.n)).toBeLessThan(0.1)
   })
 
+  it('matches every vBLE beam of an AP to its grouped (`*`) registry entry', async () => {
+    // Give each L1 beacon a grouped ID, then hear it through a different beam digit each time
+    const grouped = l1.map((b, i) => ({ ...b, id: `a023919cd30a4e79bbd9:4102${i}*e40000` }))
+    const scanner = new MockBleScanner()
+    const provider = new BleProvider(scanner, { updateIntervalMs: 1000 })
+    const fixes: LocationFix[] = []
+    provider.onFix((fix) => fixes.push(fix))
+    await provider.start({ ...sampleVenue, beacons: [...grouped, ...sampleVenue.beacons.filter((b) => b.floorId !== 'test-l1')] })
+
+    const stand = { e: 125, n: 60, u: 1.2 }
+    for (let t = 0; t <= 2000; t += 250) {
+      for (const b of grouped) {
+        const d = Math.hypot(b.enu.e - stand.e, b.enu.n - stand.n, b.enu.u - stand.u)
+        scanner.emit({ beaconId: b.id.replace('*', String((t / 250) % 9)), rssi: distanceToRssi(d, b.txPower, b.pathLossExponent), timestamp: t })
+      }
+    }
+    // Same AP digits but another instance suffix: not ours
+    scanner.emit({ beaconId: 'a023919cd30a4e79bbd9:410203d80000', rssi: -40, timestamp: 2100 })
+
+    const last = fixes.at(-1)!
+    expect(last.floorId).toBe('test-l1')
+    expect(Math.hypot(last.enu.e - stand.e, last.enu.n - stand.n)).toBeLessThan(0.1)
+  })
+
   it('reports permission errors through status instead of throwing', async () => {
     const scanner = new MockBleScanner()
     scanner.failWith = new Error('Bluetooth permission denied')

@@ -2,7 +2,7 @@
 // Survey positions arrive in the survey's local metric frame; everything is converted to WGS84 here and the local
 // frame is not stored.
 
-import { and, eq, getTableColumns, gt, sql } from 'drizzle-orm'
+import { and, eq, getTableColumns, gt, inArray, notInArray, sql } from 'drizzle-orm'
 import type { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
 import { enuToWgs84 } from '../utils/location/geo/wgs84'
 import type { StoredBeacon } from '../utils/location/beaconRegistry'
@@ -14,8 +14,11 @@ const { beacon_surveys, beacons, buildings, floors } = schema
 export interface SurveyFloorMeta {
   project_id?: string
   exported_at?: string
-  /** Local frame anchor: local (0, 0) sits at origin_latitude/longitude, local +x points at x_axis_bearing_deg */
-  geo: { origin_latitude: number, origin_longitude: number, x_axis_bearing_deg: number }
+  /**
+   * Local frame anchor: local (0, 0) sits at origin_latitude/longitude, local +x points at x_axis_bearing_deg.
+   * `scale` (ours, not bSLAM's) corrects a miscalibrated export: real meters = local meters * scale.
+   */
+  geo: { origin_latitude: number, origin_longitude: number, x_axis_bearing_deg: number, scale?: number }
   /** "counterclockwise_from_x (cartesian)" or clockwise (image-style, y down) */
   y_axis: string
   path_loss?: { height_offset_m?: number | null }
@@ -54,8 +57,9 @@ export function surveyLocalToWgs84(x: number, y: number, floor: SurveyFloorMeta)
   const xBearing = (floor.geo.x_axis_bearing_deg * Math.PI) / 180
   // Cartesian y is 90° counterclockwise of x; image-style y is 90° clockwise
   const yBearing = xBearing + (isClockwise(floor) ? Math.PI / 2 : -Math.PI / 2)
-  const e = x * Math.sin(xBearing) + y * Math.sin(yBearing)
-  const n = x * Math.cos(xBearing) + y * Math.cos(yBearing)
+  const scale = floor.geo.scale ?? 1
+  const e = (x * Math.sin(xBearing) + y * Math.sin(yBearing)) * scale
+  const n = (x * Math.cos(xBearing) + y * Math.cos(yBearing)) * scale
   const { lat, lon } = enuToWgs84({ e, n, u: 0 }, { lat: floor.geo.origin_latitude, lon: floor.geo.origin_longitude, h: 0 })
   return { lat, lon }
 }
@@ -151,7 +155,8 @@ const INSERT_CHUNK = 25
 /**
  * Imports one survey onto a floor, unless a survey with this name was already imported. Beacons are matched by
  * namespace + instance; a later survey replaces a beacon's data, except that a survey which couldn't place a
- * beacon doesn't wipe a position an earlier survey found. Safe to re-run after an interruption.
+ * beacon doesn't wipe a position an earlier survey found. A beacon in surveys of different floors belongs to the
+ * floor whose survey heard it strongest (max RSSI). Safe to re-run after an interruption.
  */
 export async function importBeaconSurvey(
   db: SqliteRemoteDatabase<typeof schema>,
@@ -180,12 +185,30 @@ export async function importBeaconSurvey(
       .onConflictDoUpdate({
         target: [beacons.namespace, beacons.instance],
         set,
-        setWhere: sql`excluded.latitude IS NOT NULL OR ${beacons.latitude} IS NULL`
+        // Same floor: replace, unless it would erase a position. Another floor (an AP heard through the floor or
+        // ceiling): the AP stays on the floor where it was heard strongest, whatever order the floors import in.
+        setWhere: sql`CASE WHEN excluded.floor_id = ${beacons.floor_id}
+          THEN excluded.latitude IS NOT NULL OR ${beacons.latitude} IS NULL
+          ELSE excluded.max_rssi_dbm > ${beacons.max_rssi_dbm} OR ${beacons.max_rssi_dbm} IS NULL END`
       })
   }
 
   await db.update(beacon_surveys).set({ imported_at: Date.now() }).where(eq(beacon_surveys.id, surveyRow!.id))
   return { imported: rows.length, skipped }
+}
+
+/**
+ * Deletes a floor's imported surveys that aren't in `keep`, and the beacons they last set, so a replaced survey's
+ * beacons don't linger on devices that imported it. Beacons not set by a survey (survey_id null) are kept.
+ */
+export async function removeStaleSurveys(db: SqliteRemoteDatabase<typeof schema>, floorId: number, keep: string[]) {
+  const stale = await db.select({ id: beacon_surveys.id }).from(beacon_surveys)
+    .where(and(eq(beacon_surveys.floor_id, floorId), notInArray(beacon_surveys.name, keep)))
+  if (stale.length === 0) return 0
+  const ids = stale.map((s) => s.id)
+  await db.delete(beacons).where(inArray(beacons.survey_id, ids))
+  await db.delete(beacon_surveys).where(inArray(beacon_surveys.id, ids))
+  return ids.length
 }
 
 /** Every beacon with its building, floor level, and the survey's height offset, for `toBeaconRegistry` */

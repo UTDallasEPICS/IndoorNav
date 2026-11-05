@@ -185,6 +185,7 @@
           <h2>Set Your Location</h2>
         </div>
         <p class="sheet-hint">
+          <template v-if="pickedBecauseLost">We can't find you right now. </template>
           Move the map so the marker is where you are.
           <button class="link-button" type="button" @click="cancelPicking">Cancel</button>
         </p>
@@ -254,7 +255,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { loadRouteGrid } from '~/utils/route-between'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
-const { position: locationFix, startLocation, stopLocation, canRoute, routeTo } = useNavigation()
+const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo } = useNavigation()
 
 const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
 const mapImage = ref(null) // the <img> floor plan
@@ -467,6 +468,7 @@ async function startPicking() { // 📍 button
   stopAnimation()
   following.value = false
   step.value = 'pick'
+  pickedBecauseLost.value = false
 
   await nextTick() // wait for the shorter pick sheet to render (Vue updates the page in batches)
   showPoint(userLocation.value ?? startPoint.value) // bring the current location under the centred marker
@@ -722,6 +724,21 @@ const suggestions = computed(() => {
 })
 
 const showSuggestions = computed(() => suggestionsOpen.value && suggestions.value.length > 0)
+
+// No live location for a minute (beacons gone): open "Set Your Location" without being asked. Once per outage, so
+// Cancel sticks until beacons come back; never over a location the user set, or while they're typing a destination.
+const pickedBecauseLost = ref(false) // the pick sheet was opened by this, not the 📍 button
+let promptedThisOutage = false
+watch(locationLost, lost => { if (!lost) promptedThisOutage = false })
+watch(
+  () => locationLost.value && step.value === 'destination' && !manualLocation.value && !suggestionsOpen.value && ready.value,
+  shouldPrompt => {
+    if (!shouldPrompt || promptedThisOutage) return
+    promptedThisOutage = true
+    startPicking()
+    pickedBecauseLost.value = true // after startPicking, which clears it
+  }
+)
 
 function pickSuggestion(room) {
   destination.value = room.label

@@ -13,20 +13,26 @@ import { CapacitorBleScanner } from './providers/ble/capacitorScanner'
 import { CapacitorGpsSource } from './providers/gps/capacitorGpsSource'
 import { GpsProvider } from './providers/gps/GpsProvider'
 import type { LocationProvider } from './providers/LocationProvider'
+import { CapacitorMotionSource } from './providers/pdr/capacitorMotionSource'
+import { PdrProvider, type PdrProviderOptions } from './providers/pdr/PdrProvider'
 import type { LocationEvent, LocationFix, MapPosition, ProviderId, ProviderStatus, VenueConfig } from './types'
 import { indexVenue } from './venue'
 
 export type { LocationEvent, LocationFix, MapPosition, ProviderStatus, VenueConfig } from './types'
 export { spnVenue } from './venues/spn'
 export { withStoredBeacons, type StoredBeacon } from './beaconRegistry'
+export { requestMotionPermission } from './providers/pdr/capacitorMotionSource'
 
 export interface LocationServiceOptions {
   providers: LocationProvider[]
+  /** Step + compass tracking. Optional: without it the fused track is smoothed from BLE/GPS alone. */
+  motion?: PdrProvider
   fusion?: Partial<FusionOptions>
 }
 
 export class LocationService {
   private providers: LocationProvider[]
+  private motion: PdrProvider | null
   private fusionOptions: Partial<FusionOptions>
   private fusion: FusionEngine | null = null
   private fixes = new Emitter<LocationFix>()
@@ -40,6 +46,7 @@ export class LocationService {
 
   constructor(options: LocationServiceOptions) {
     this.providers = options.providers
+    this.motion = options.motion ?? null
     this.fusionOptions = options.fusion ?? {}
   }
 
@@ -108,12 +115,22 @@ export class LocationService {
         })
       )
     }
-    await Promise.all(this.providers.map((provider) => provider.start(venue)))
+    if (this.motion) {
+      this.cleanup.push(
+        this.motion.onStep((step) => fusion.ingestStep(step)),
+        this.motion.onMotion((state) => fusion.ingestMotion(state)),
+        this.motion.onStatus((status) => {
+          this.latestStatus[status.provider] = status
+          this.statuses.emit(status)
+        })
+      )
+    }
+    await Promise.all([...this.providers, ...(this.motion ? [this.motion] : [])].map((provider) => provider.start(venue)))
   }
 
   async stop() {
     if (!this.fusion) return
-    await Promise.all(this.providers.map((provider) => provider.stop()))
+    await Promise.all([...this.providers, ...(this.motion ? [this.motion] : [])].map((provider) => provider.stop()))
     for (const off of this.cleanup) off()
     this.cleanup = []
     this.fusion = null
@@ -122,9 +139,18 @@ export class LocationService {
   }
 }
 
-/** The service as the app runs it on a phone: BLE beacons (+ GPS unless `gps: false`) via Capacitor plugins. */
-export function createDeviceLocationService(options: { ble?: Partial<BleProviderOptions>, fusion?: Partial<FusionOptions>, gps?: boolean } = {}) {
+/**
+ * The service as the app runs it on a phone, via Capacitor: BLE beacons, step + compass tracking (unless
+ * `pdr: false`), and GPS (unless `gps: false`).
+ */
+export function createDeviceLocationService(options: {
+  ble?: Partial<BleProviderOptions>
+  pdr?: Partial<PdrProviderOptions> | false
+  fusion?: Partial<FusionOptions>
+  gps?: boolean
+} = {}) {
   const providers: LocationProvider[] = [new BleProvider(new CapacitorBleScanner(), options.ble)]
   if (options.gps ?? true) providers.push(new GpsProvider(new CapacitorGpsSource()))
-  return new LocationService({ providers, fusion: options.fusion })
+  const motion = options.pdr === false ? undefined : new PdrProvider(new CapacitorMotionSource(), options.pdr)
+  return new LocationService({ providers, motion, fusion: options.fusion })
 }
