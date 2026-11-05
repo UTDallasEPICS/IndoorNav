@@ -59,6 +59,25 @@ describe('end-to-end simulated walk', () => {
     expect(result.report.meanM).toBeLessThan(result.bleReport.meanM)
   })
 
+  it('step + compass tracking cuts jitter and error', async () => {
+    for (const seed of [1, 2, 3]) {
+      const base = await runSimulation({ venue: sampleVenue, path: sampleWalk, sim: { seed } })
+      const pdr = await runSimulation({ venue: sampleVenue, path: sampleWalk, sim: { seed }, pdr: true })
+      expect(pdr.report.jitterM).toBeLessThan(base.report.jitterM * 0.6)
+      expect(pdr.report.meanM).toBeLessThan(base.report.meanM)
+    }
+  })
+
+  it('keeps the dot still while standing', async () => {
+    const stand = [
+      { t: 0, e: 130, n: 60, floorId: 'test-l1' },
+      { t: 60, e: 130, n: 60, floorId: 'test-l1' }
+    ]
+    const result = await runSimulation({ venue: sampleVenue, path: stand, pdr: true })
+    const settled = result.fused.filter((f) => f.timestamp >= DEFAULT_SIM.startTime + 10_000)
+    expect(errorReport(settled, stand).jitterM).toBeLessThan(0.5)
+  })
+
   it('keeps working on GPS alone when Bluetooth is denied', async () => {
     const scanner = new MockBleScanner()
     scanner.failWith = new Error('Bluetooth permission denied')
