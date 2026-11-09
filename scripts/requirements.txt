@@ -1,0 +1,7 @@
+# Python packages for the offline developer scripts in scripts/ (the app itself needs none).
+# Install with: pip install -r scripts/requirements.txt
+numpy        # navigation.py, fit-grid-bounds.py
+scipy        # navigation.py: fast wall-distance map (optional: a slower pure-Python fallback is used without it)
+matplotlib   # navigation.py --plot only
+Pillow       # fit-grid-bounds.py
+ezdxf        # cad-to-svg.py
