@@ -34,7 +34,8 @@ cad-source/SPN-level-1.dwg   (private, gitignored — never commit)
   └─ dwg2dxf ─► .dxf
        └─ scripts/cad-to-svg.py ─► public/maps/spn-level1.svg        (only navigation layers: walls, doors, stairs, glass, room labels)
                                 └► public/maps/spn-level1-rooms.json  ([{ number, name, x, y }])
-public/data/SPN.txt                544 × 848 grid of 0/1 cells (0 = open, 1 = wall) that the app routes on (Map generation workstream)
+public/data/SPN.txt                544 × 848 grid of 0/1 cells (0 = open, 1 = wall) that the app routes on for level 1 (Map generation workstream)
+public/data/SPN-level2.txt         same format, level 2 (added 2026-10-30; the source picture included furniture, so rooms contain extra wall cells)
 public/data/spn-level1-grid.json   226 × 478 matrix, not used by the app (ask Bao before relying on or deleting it)
 ```
 
@@ -44,9 +45,9 @@ public/data/spn-level1-grid.json   226 × 478 matrix, not used by the app (ask B
 - Room numbers aren't unique (e.g. several `1.1` corridors/lobbies); match rooms by number **and** name.
 - To add a floor or building, extend the pipeline (one SVG + rooms JSON + grid per floor) rather than hand-editing
   output files. Name files `<building>-level<N>-*.{svg,json}`.
-- `SPN.txt` doesn't share the SVG's frame: `GRID_BOUNDS` in `shared/grid-map.js` gives the grid rows/columns where
-  the map's 0–1 edges fall. Re-fit it if `SPN.txt` or the SVG is regenerated. `scripts/navigation.py` (the Python
-  reference A\*) reads the same file.
+- The grids don't share the SVGs' frame: `GRID_BOUNDS` in `shared/grid-map.js` gives, per floor, the grid rows/columns
+  where the map's 0–1 edges fall. Re-fit a floor with `scripts/fit-grid-bounds.py` if its grid or SVG is regenerated.
+  `scripts/navigation.py` (the Python reference A\*) reads the level 1 file.
 
 ### Runtime pipeline (target design, per the ADR)
 
