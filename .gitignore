@@ -3,3 +3,7 @@
 *.jpg
 *.jpeg
 node_modules
+/.nuxt
+/.output
+/android
+/dist
