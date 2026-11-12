@@ -128,6 +128,18 @@
       </div>
     </main>
 
+    <!-- Legend button, top left (the floor switcher has the top right). Opens the legend panel. -->
+    <button
+      class="legend-button"
+      type="button"
+      :aria-pressed="legendOpen"
+      aria-label="Map legend"
+      @click="legendOpen = !legendOpen"
+    > <!-- tap again to close -->
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+      Legend
+    </button>
+
     <!-- Floor switcher, top right. Outside <main> so taps don't start a map drag. -->
     <div class="floor-toggle" role="group" aria-label="Floor">
       <button
@@ -247,6 +259,9 @@
         </form>
       </template>
     </section>
+
+    <!-- Legend panel slides up over the sheet (components/MapLegend.vue) -->
+    <MapLegend :open="legendOpen" @close="legendOpen = false" />
   </div>
 </template>
 
@@ -260,6 +275,7 @@ const { position: locationFix, locationLost, startLocation, stopLocation, canRou
 const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
 const mapImage = ref(null) // the <img> floor plan
 const sheet = ref(null) // the bottom sheet <section>
+const legendOpen = ref(false) // legend panel showing (Legend button, top left)
 
 const error = ref('') // shown on screen whenever it isn't empty
 
@@ -1113,6 +1129,42 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 }
 
 /* ---------------- CONTROLS ---------------- */
+
+.legend-button {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top)); /* same height as the floor toggle */
+  left: 16px;
+  height: 46px; /* matches the floor toggle (36px buttons + padding + border) */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.legend-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.legend-button[aria-pressed='true'] { /* lime while the panel is open */
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
 
 .floor-toggle {
   position: absolute;
