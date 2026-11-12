@@ -30,6 +30,38 @@
         @error="onImageError"
       > <!-- ":" before an attribute = its value comes from the script and updates by itself -->
 
+      <!-- Legend areas (public/maps/spn-legend.json): rooms filled in their colour. Same size and position as the
+           floor plan; viewBox 0–1 so the outlines' fractions are used as-is. Under the destination fill and route. -->
+      <svg
+        v-if="ready && legendAreasHere.length"
+        class="legend-areas"
+        viewBox="0 0 1 1"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        :style="{
+          width: `${imageWidth * scale}px`,
+          height: `${imageHeight * scale}px`,
+          transform: `translate(${offsetX}px, ${offsetY}px)`
+        }"
+      >
+        <polygon
+          v-for="area in legendAreasHere"
+          :key="`${area.number}-${area.name}`"
+          :points="area.outline.map(point => point.join(',')).join(' ')"
+          :style="{ fill: area.color, stroke: area.color }"
+        /> <!-- see-through fill comes from fill-opacity in the CSS -->
+      </svg>
+
+      <!-- Legend points: a dot on rooms with type "point" (or no outline). Same size on screen at any zoom. -->
+      <template v-if="ready">
+        <div
+          v-for="point in legendPointsHere"
+          :key="`${point.number}-${point.name}`"
+          class="legend-point"
+          :style="{ '--c': point.color, transform: `translate(${toScreenX(point.x)}px, ${toScreenY(point.y)}px)` }"
+        />
+      </template>
+
       <!-- Destination room filled in. Same size and position as the floor plan, and its
            viewBox is 0–1 so the outline's fractions can be used as-is. -->
       <Transition name="room-fill"> <!-- fades the fill in/out using the .room-fill-* classes in the CSS -->
@@ -261,13 +293,14 @@
     </section>
 
     <!-- Legend panel slides up over the sheet (components/MapLegend.vue) -->
-    <MapLegend :open="legendOpen" @close="legendOpen = false" />
+    <MapLegend :open="legendOpen" :rows="legendRows(legendEntries)" @close="legendOpen = false" />
   </div>
 </template>
 
 <script setup> // "setup": everything declared here can be used in the template above
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { loadRouteGrid } from '~/utils/route-between'
+import { resolveLegend, legendRows } from '~/utils/legend'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
 const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo } = useNavigation()
@@ -306,6 +339,15 @@ const floorMap = computed(() => FLOORS.find(option => option.level === floor.val
 // Rooms of every floor: { number, name, x, y, outline?, floor }, with x/y as
 // fractions (0–1) of that floor plan's width/height
 const rooms = ref([])
+
+// Legend: what to highlight, from public/maps/spn-legend.json; resolveLegend looks up each room's outline or position
+const legendEntries = ref([]) // [{ number, name, label, color, type, legend }]
+const legendShapes = computed(() => resolveLegend(legendEntries.value, rooms.value)) // { areas, points, missing }
+const legendAreasHere = computed(() => legendShapes.value.areas.filter(area => area.floor === mapFloor.value)) // only the floor on screen
+const legendPointsHere = computed(() => legendShapes.value.points.filter(point => point.floor === mapFloor.value))
+watch(() => rooms.value.length && legendShapes.value.missing, missing => { // a typo in the JSON shows up in the console, not silently
+  if (missing?.length) console.warn('Legend rooms not found:', missing.map(entry => `${entry.number} ${entry.name}`))
+})
 
 // Where the map opens: the main lobby (or the middle of level 1 if it's missing)
 const startPoint = computed(() =>
@@ -369,6 +411,14 @@ async function loadRooms() { // async: can `await` things like network requests
   } catch (err) {
     console.error(err)
     error.value = 'Failed to load the room list.'
+  }
+}
+
+async function loadLegend() { // the map still works without it, so a failure is only logged
+  try {
+    legendEntries.value = await $fetch('/maps/spn-legend.json')
+  } catch (err) {
+    console.error('Failed to load the map legend.', err)
   }
 }
 
@@ -862,6 +912,7 @@ onMounted(() => { // runs once the page is on screen in the browser
   if (mapImage.value?.complete && mapImage.value.naturalWidth) onImageLoad()
 
   loadRooms()
+  loadLegend()
   FLOORS.forEach(option => loadRouteGrid(option.level).catch(() => {})) // start loading each floor's grid now so Find Route is quick; errors show when it's pressed
   startLocation() // BLE positioning; if it's unavailable the user just places themselves by hand
   window.addEventListener('resize', onResize)
@@ -914,6 +965,31 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 .location-marker.shown,
 .start-pin.shown {
   opacity: 1;
+}
+
+.legend-areas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none; /* drags go to the map */
+}
+
+.legend-areas polygon { /* fill and stroke colours come from the JSON (inline style) */
+  fill-opacity: 0.35; /* see-through plain fill, no gradient */
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke; /* 1.5px on screen at any zoom (the viewBox is only 1 unit wide) */
+}
+
+.legend-point { /* small solid dot */
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px; /* the transform moves the top-left corner; this centres the dot on the point */
+  border-radius: 50%;
+  background: var(--c);
+  pointer-events: none;
 }
 
 .room-highlight {
