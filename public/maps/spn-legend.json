@@ -11,9 +11,6 @@
  {"number": "2.1R1", "name": "WOMENS", "label": "Restrooms", "color": "#4f8fd6", "type": "area", "legend": true},
  {"number": "2.1R2", "name": "MENS", "label": "Restrooms", "color": "#4f8fd6", "type": "area", "legend": true},
 
- {"number": "1.1V1", "name": "ELEV", "label": "Elevator", "color": "#2fa39a", "type": "point", "legend": true},
- {"number": "2.1V1", "name": "ELEV", "label": "Elevator", "color": "#2fa39a", "type": "point", "legend": true},
-
  {"number": "1.1S1", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true},
  {"number": "1.1S2", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true},
  {"number": "1.1S3", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true,
@@ -21,11 +18,5 @@
  {"number": "1.2S1", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true},
  {"number": "1.7S1", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true},
  {"number": "2.1S3", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true},
- {"number": "2.2S1", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true},
-
- {"number": "1.001", "name": "VESTIBULE", "label": "Exits", "color": "#e5484d", "type": "point", "legend": true},
- {"number": "1.002", "name": "VESTIBULE", "label": "Exits", "color": "#e5484d", "type": "point", "legend": true},
- {"number": "1.003", "name": "VESTIBULE", "label": "Exits", "color": "#e5484d", "type": "point", "legend": true},
- {"number": "1.004", "name": "VESTIBULE", "label": "Exits", "color": "#e5484d", "type": "point", "legend": true},
- {"number": "1.005", "name": "VESTIBULE", "label": "Exits", "color": "#e5484d", "type": "point", "legend": true}
+ {"number": "2.2S1", "name": "STAIRS", "label": "Stairs", "color": "#9b7be0", "type": "area", "legend": true}
 ]

@@ -32,9 +32,12 @@ KEEP_LAYERS = {
     "A-STAIRS",
     "A-FLOR",
     "A-GLAZ-CWMG",  # curtain wall
-    "A-ROOM NAME",
     "A-ROOM NUMBER",
 }
+
+# Not drawn, to keep the map uncluttered (find_rooms still reads the names for search),
+# but still counted in the map's frame so room positions and the route grid line up as before.
+FRAME_ONLY_LAYERS = {"A-ROOM NAME"}
 
 # A room name counts as belonging to a room number if it is this close (in
 # drawing units, inches) to the number's label.
@@ -121,18 +124,24 @@ def main(src, svg_dst, rooms_dst=None):
     doc, _ = recover.readfile(src)
     msp = doc.modelspace()
 
-    backend = svg.SVGBackend()
     cfg = config.Configuration(
         background_policy=config.BackgroundPolicy.WHITE,
         color_policy=config.ColorPolicy.BLACK,
         lineweight_policy=config.LineweightPolicy.RELATIVE,
     )
-    Frontend(RenderContext(doc), backend, config=cfg).draw_layout(
-        msp, filter_func=lambda e: e.dxf.layer in KEEP_LAYERS
-    )
 
-    # Page size 0 = fit to the drawing's extents.
-    content = backend.player().bbox()
+    def render(layers):
+        backend = svg.SVGBackend()
+        Frontend(RenderContext(doc), backend, config=cfg).draw_layout(
+            msp, filter_func=lambda e: e.dxf.layer in layers
+        )
+        return backend
+
+    backend = render(KEEP_LAYERS)  # what the map shows
+
+    # The frame (page size 0 = fit to the extents) includes FRAME_ONLY_LAYERS, so dropping
+    # their text doesn't shrink the page and shift every position.
+    content = render(KEEP_LAYERS | FRAME_ONLY_LAYERS).player().bbox()
     page = layout.Page(0, 0, layout.Units.inch, margins=layout.Margins.all(0))
     with open(svg_dst, "wt") as f:
         f.write(backend.get_string(page, render_box=content))
