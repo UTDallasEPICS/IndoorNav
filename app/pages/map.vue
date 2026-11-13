@@ -95,10 +95,10 @@
 
       <!-- "You are here" arrow pinned to the map, pointing the way you're heading. Same size on screen at any zoom. -->
       <div
-        v-else-if="ready && userLocation?.floor === mapFloor"
+        v-else-if="ready && arrowLocation?.floor === mapFloor"
         class="location-marker"
         :class="{ shown: viewReady }"
-        :style="{ transform: `translate(${toScreenX(userLocation.x)}px, ${toScreenY(userLocation.y)}px)` }"
+        :style="{ transform: `translate(${toScreenX(arrowLocation.x)}px, ${toScreenY(arrowLocation.y)}px)` }"
       > <!-- v-else-if: shown when the v-if above is false; moves with the map via toScreenX/Y -->
         <AppLogo :size="28" :style="{ transform: `rotate(${markerRotation}deg)` }" /> <!-- components/AppLogo.vue -->
       </div>
@@ -253,6 +253,7 @@
 <script setup> // "setup": everything declared here can be used in the template above
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { loadRouteGrid } from '~/utils/route-between'
+import { snapToRoute } from '~/utils/snap-to-route'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
 const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo } = useNavigation()
@@ -320,6 +321,16 @@ const WIDTH_PER_METER = 0.00782
 const accuracyRadius = computed(() => // circle radius in screen px (metres -> plan widths -> px)
   locationFix.value ? locationFix.value.accuracyM * WIDTH_PER_METER * imageWidth.value * scale.value : 0
 )
+
+const OFF_ROUTE_M = 5 // further than this from the route line, the arrow shows where you really are
+
+const arrowLocation = computed(() => { // where the arrow is drawn: on the route line while navigating, else userLocation
+  const fix = locationFix.value
+  if (manualLocation.value || !fix || !route.value || route.value.floor !== fix.floor) return userLocation.value // only the live location snaps; a hand-set one is exact
+  const snap = snapToRoute(fix, route.value.points, imageHeight.value / imageWidth.value) // perpendicular onto the nearest part of the line
+  if (!snap || snap.distance / WIDTH_PER_METER > OFF_ROUTE_M) return fix // off route: show the real position
+  return { ...fix, x: snap.x, y: snap.y } // same fix (floor, heading...), moved onto the line
+})
 
 const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0) // map image and rooms both loaded
 
@@ -418,11 +429,11 @@ function resetView() {
 function goToMyLocation() {
   if (!ready.value) return
   if (step.value !== 'pick') following.value = true
-  showPoint(userLocation.value ?? startPoint.value, startScale())
+  showPoint(arrowLocation.value ?? startPoint.value, startScale())
 }
 
 // Keep the arrow centred as live fixes come in, until the user drags the map away
-watch(() => ready.value && userLocation.value, point => {
+watch(() => ready.value && arrowLocation.value, point => { // the arrow, so the view follows it along the route
   if (!point || !following.value || step.value === 'pick' || isPanning.value) return
   showPoint(point)
 })
