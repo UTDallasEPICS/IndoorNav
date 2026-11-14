@@ -28,6 +28,8 @@
 	<string>Indoor Navigation listens for Wi-Fi access point beacons to find where you are inside the building. Your location stays on this phone.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Indoor Navigation uses your location to show where you are on campus and guide you to your destination. Your location stays on this phone.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Indoor Navigation uses the barometer to tell which floor you're on. Your data stays on this phone.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

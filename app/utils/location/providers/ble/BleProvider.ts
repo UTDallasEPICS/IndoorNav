@@ -1,4 +1,5 @@
 // BLE location provider: beacon adverts -> smoothed RSSI -> floor vote -> distances -> position fix.
+// The floor comes from the vote, unless a floor selector (the barometer) picks it; see setFloorSelector.
 
 import { Emitter } from '../../emitter'
 import { enuToWgs84 } from '../../geo/wgs84'
@@ -6,7 +7,7 @@ import { indexVenue, type VenueIndex } from '../../venue'
 import type { LocationEvent, LocationFix, ProviderStatus, VenueConfig } from '../../types'
 import type { LocationProvider } from '../LocationProvider'
 import { estimators, type BeaconRange, type EstimatorName } from './estimators'
-import { voteFloor } from './floorVote'
+import { voteFloorWithShare, type FloorVote } from './floorVote'
 import { rssiToDistance } from './pathLoss'
 import { DEFAULT_RSSI_FILTER, RssiFilterBank, type RssiFilterOptions } from './rssiFilter'
 import type { BeaconAdvert, BleScanner } from './scanner'
@@ -33,6 +34,13 @@ export const DEFAULT_BLE_OPTIONS: BleProviderOptions = {
   rssiFilter: DEFAULT_RSSI_FILTER
 }
 
+/**
+ * Picks the floor to position on, given the BLE floor vote (null without readings). Returns null to use the vote.
+ * The barometer uses this: it anchors to confident votes, then keeps the floor steady when beacons from the floor
+ * above or below bleed through.
+ */
+export type FloorSelector = (vote: FloorVote | null, timestamp: number) => string | null
+
 export class BleProvider implements LocationProvider {
   readonly id = 'ble' as const
   private options: BleProviderOptions
@@ -42,6 +50,7 @@ export class BleProvider implements LocationProvider {
   private bank: RssiFilterBank
   private index: VenueIndex | null = null
   private lastFixTime = -Infinity
+  private floorSelector: FloorSelector | null = null
 
   constructor(private scanner: BleScanner, options: Partial<BleProviderOptions> = {}) {
     this.options = { ...DEFAULT_BLE_OPTIONS, ...options }
@@ -51,6 +60,11 @@ export class BleProvider implements LocationProvider {
   onFix(listener: (fix: LocationFix) => void) { return this.fixes.on(listener) }
   onStatus(listener: (status: ProviderStatus) => void) { return this.statuses.on(listener) }
   onEvent(listener: (event: LocationEvent) => void) { return this.events.on(listener) }
+
+  /** Lets another sensor pick the floor (it still sees every vote). Null goes back to the vote alone. */
+  setFloorSelector(selector: FloorSelector | null) {
+    this.floorSelector = selector
+  }
 
   async start(venue: VenueConfig) {
     this.index = indexVenue(venue)
@@ -91,7 +105,8 @@ export class BleProvider implements LocationProvider {
   private computeFix(now: number): LocationFix | null {
     const index = this.index!
     const readings = this.bank.readings(now).map((r) => ({ ...r, beacon: index.beacons.get(r.beaconId)! }))
-    const floorId = voteFloor(readings.map((r) => ({ floorId: r.beacon.floorId, rssi: r.rssi })), this.options.floorVoteTopN)
+    const vote = voteFloorWithShare(readings.map((r) => ({ floorId: r.beacon.floorId, rssi: r.rssi })), this.options.floorVoteTopN)
+    const floorId = this.floorSelector?.(vote, now) ?? vote?.floorId ?? null
     const floorInfo = floorId ? index.floors.get(floorId) : undefined
     if (!floorId || !floorInfo) return null
 

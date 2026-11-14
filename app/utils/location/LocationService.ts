@@ -8,6 +8,9 @@
 import { Emitter } from './emitter'
 import { FusionEngine, type FusionOptions } from './fusion/FusionEngine'
 import { toMapPosition } from './mapPosition'
+import { BarometerProvider, type BarometerReading } from './providers/barometer/BarometerProvider'
+import { CapacitorPressureSource } from './providers/barometer/capacitorPressureSource'
+import type { BarometerFloorOptions } from './providers/barometer/floorTracker'
 import { BleProvider, type BleProviderOptions } from './providers/ble/BleProvider'
 import { CapacitorBleScanner } from './providers/ble/capacitorScanner'
 import { CapacitorGpsSource } from './providers/gps/capacitorGpsSource'
@@ -21,18 +24,26 @@ import { indexVenue } from './venue'
 export type { LocationEvent, LocationFix, MapPosition, ProviderStatus, VenueConfig } from './types'
 export { spnVenue } from './venues/spn'
 export { withStoredBeacons, type StoredBeacon } from './beaconRegistry'
+export { withStoredFloors, type StoredFloor } from './floorRegistry'
+export type { BarometerReading } from './providers/barometer/BarometerProvider'
 export { requestMotionPermission } from './providers/pdr/capacitorMotionSource'
 
 export interface LocationServiceOptions {
   providers: LocationProvider[]
   /** Step + compass tracking. Optional: without it the fused track is smoothed from BLE/GPS alone. */
   motion?: PdrProvider
+  /**
+   * Barometer. Optional: started and stopped with the rest. Connect it to the BLE provider with
+   * `ble.setFloorSelector` so it picks the floor (createDeviceLocationService does).
+   */
+  barometer?: BarometerProvider
   fusion?: Partial<FusionOptions>
 }
 
 export class LocationService {
   private providers: LocationProvider[]
   private motion: PdrProvider | null
+  private barometer: BarometerProvider | null
   private fusionOptions: Partial<FusionOptions>
   private fusion: FusionEngine | null = null
   private fixes = new Emitter<LocationFix>()
@@ -47,6 +58,7 @@ export class LocationService {
   constructor(options: LocationServiceOptions) {
     this.providers = options.providers
     this.motion = options.motion ?? null
+    this.barometer = options.barometer ?? null
     this.fusionOptions = options.fusion ?? {}
   }
 
@@ -87,6 +99,11 @@ export class LocationService {
     return this.statuses.on(listener)
   }
 
+  /** Listens for the barometer's readings and floor (for testing floor changes). A no-op without a barometer. */
+  subscribeBarometer(listener: (reading: BarometerReading) => void): () => void {
+    return this.barometer ? this.barometer.onReading(listener) : () => {}
+  }
+
   /** Starts every provider. A provider that fails (e.g. permission denied) reports it via status; the rest keep running. */
   async start(venue: VenueConfig) {
     await this.stop()
@@ -125,32 +142,46 @@ export class LocationService {
         })
       )
     }
-    await Promise.all([...this.providers, ...(this.motion ? [this.motion] : [])].map((provider) => provider.start(venue)))
+    if (this.barometer) {
+      this.cleanup.push(this.barometer.onStatus((status) => {
+        this.latestStatus[status.provider] = status
+        this.statuses.emit(status)
+      }))
+    }
+    await Promise.all(this.allProviders().map((provider) => provider.start(venue)))
   }
 
   async stop() {
     if (!this.fusion) return
-    await Promise.all([...this.providers, ...(this.motion ? [this.motion] : [])].map((provider) => provider.stop()))
+    await Promise.all(this.allProviders().map((provider) => provider.stop()))
     for (const off of this.cleanup) off()
     this.cleanup = []
     this.fusion = null
     this.latestFix = null
     this.latestPosition = null
   }
+
+  private allProviders(): Array<{ start(venue: VenueConfig): Promise<void>, stop(): Promise<void> }> {
+    return [...this.providers, ...(this.motion ? [this.motion] : []), ...(this.barometer ? [this.barometer] : [])]
+  }
 }
 
 /**
  * The service as the app runs it on a phone, via Capacitor: BLE beacons, step + compass tracking (unless
- * `pdr: false`), and GPS (unless `gps: false`).
+ * `pdr: false`), the barometer picking the floor (unless `barometer: false`), and GPS (unless `gps: false`).
  */
 export function createDeviceLocationService(options: {
   ble?: Partial<BleProviderOptions>
   pdr?: Partial<PdrProviderOptions> | false
+  barometer?: Partial<BarometerFloorOptions> | false
   fusion?: Partial<FusionOptions>
   gps?: boolean
 } = {}) {
-  const providers: LocationProvider[] = [new BleProvider(new CapacitorBleScanner(), options.ble)]
+  const ble = new BleProvider(new CapacitorBleScanner(), options.ble)
+  const providers: LocationProvider[] = [ble]
   if (options.gps ?? true) providers.push(new GpsProvider(new CapacitorGpsSource()))
   const motion = options.pdr === false ? undefined : new PdrProvider(new CapacitorMotionSource(), options.pdr)
-  return new LocationService({ providers, motion, fusion: options.fusion })
+  const barometer = options.barometer === false ? undefined : new BarometerProvider(new CapacitorPressureSource(), options.barometer)
+  if (barometer) ble.setFloorSelector((vote, timestamp) => barometer.chooseFloor(vote, timestamp))
+  return new LocationService({ providers, motion, barometer, fusion: options.fusion })
 }

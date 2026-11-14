@@ -5,7 +5,8 @@
 import { Capacitor } from '@capacitor/core'
 import { readonly, ref } from 'vue'
 import { listBeacons } from '~/db/beacons'
-import { createDeviceLocationService, requestMotionPermission, spnVenue, withStoredBeacons, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
+import { listFloors } from '~/db/floors'
+import { createDeviceLocationService, requestMotionPermission, spnVenue, withStoredBeacons, withStoredFloors, type BarometerReading, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
 import { routeBetween } from '~/utils/route-between'
 
 export type { MapPosition }
@@ -26,6 +27,10 @@ const position = ref<MapPosition | null>(null)
 const locationStatus = ref<ProviderStatus['state']>('idle')
 const locationMessage = ref('')
 const locationLost = ref(false)
+// Barometer floor tracking, for the map's test readout. Null reading = no samples yet
+const barometerStatus = ref<ProviderStatus['state']>('idle')
+const barometerMessage = ref('')
+const barometerReading = ref<BarometerReading | null>(null)
 let lastHeardAt = 0 // when we last had a position, or when scanning started
 let service: LocationService | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
@@ -49,12 +54,18 @@ export function useNavigation() {
     const created = createDeviceLocationService({ gps: false })
     service = created
     created.onStatus(status => {
+      if (status.provider === 'barometer') {
+        barometerStatus.value = status.state
+        barometerMessage.value = status.message ?? ''
+        return
+      }
       // Only BLE decides whether there's a live location; without motion sensors it still works, just less smoothly
       if (status.provider !== 'ble') return
       if (status.state === 'running' && locationStatus.value !== 'running') lastHeardAt = Date.now()
       locationStatus.value = status.state
       locationMessage.value = status.message ?? ''
     })
+    created.subscribeBarometer(reading => { barometerReading.value = reading })
     created.subscribePosition(p => {
       position.value = p
       lastHeardAt = Date.now()
@@ -66,10 +77,12 @@ export function useNavigation() {
       locationLost.value = locationStatus.value === 'running' && Date.now() - lastHeardAt > LOST_AFTER_MS
     }, 1000)
 
-    // Beacon positions and path-loss fits come from the on-device database (the bSLAM survey import)
+    // Floor heights (for the barometer), beacon positions and path-loss fits come from the on-device database.
+    // Floors first: beacon heights are worked out from them.
     let venue
     try {
-      venue = withStoredBeacons(spnVenue, await listBeacons(await useDb()))
+      const db = await useDb()
+      venue = withStoredBeacons(withStoredFloors(spnVenue, await listFloors(db)), await listBeacons(db))
     } catch (err) {
       if (service === created) {
         locationStatus.value = 'error'
@@ -97,6 +110,9 @@ export function useNavigation() {
     position.value = null
     locationLost.value = false
     locationStatus.value = 'idle'
+    barometerStatus.value = 'idle'
+    barometerMessage.value = ''
+    barometerReading.value = null
     await stopping.stop()
   }
 
@@ -115,6 +131,9 @@ export function useNavigation() {
     locationStatus: readonly(locationStatus),
     locationMessage: readonly(locationMessage),
     locationLost: readonly(locationLost), // true after LOST_AFTER_MS of scanning with no position
+    barometerStatus: readonly(barometerStatus),
+    barometerMessage: readonly(barometerMessage),
+    barometerReading: readonly(barometerReading), // pressure, height, barometer floor vs BLE vote; null before the first sample
     startLocation,
     stopLocation,
     canRoute,

@@ -10,6 +10,7 @@ const { buildings, floors, rooms } = schema
 // `geo` overrides the export's georeference (where the survey's local frame sits on Earth).
 export const SPN1_LEVEL1 = {
   level: 1,
+  elevation_m: 0,
   svg_path: '/maps/spn-level1.svg',
   grid_path: '/data/spn-level1-grid.json',
   rooms_path: '/maps/spn-level1-rooms.json',
@@ -31,6 +32,9 @@ export const SPN1_LEVEL1 = {
 
 export const SPN1_LEVEL2 = {
   level: 2,
+  // Not measured yet: a typical 14 ft floor-to-floor. Measure it with the barometer (pressure at the bottom and
+  // top of the stairs) and update it here; the seed rewrites it on every launch.
+  elevation_m: 4.27,
   svg_path: '/maps/spn-level2.svg',
   grid_path: '', // no routing grid for level 2 yet (Map generation workstream)
   rooms_path: '/maps/spn-level2-rooms.json',
@@ -70,9 +74,14 @@ async function seedFloor(db: SqliteRemoteDatabase<typeof schema>, buildingId: nu
     level: data.level,
     svg_path: data.svg_path,
     grid_path: data.grid_path,
+    elevation_m: data.elevation_m,
   }).onConflictDoNothing()
   const [floor] = await db.select().from(floors)
     .where(and(eq(floors.building_id, buildingId), eq(floors.level, data.level)))
+  // Floors seeded before elevation_m existed, or with an older value, get the current one
+  if (floor!.elevation_m !== data.elevation_m) {
+    await db.update(floors).set({ elevation_m: data.elevation_m }).where(eq(floors.id, floor!.id))
+  }
 
   const [existing] = await db.select({ n: count() }).from(rooms).where(eq(rooms.floor_id, floor!.id))
   if (!existing || existing.n === 0) {
