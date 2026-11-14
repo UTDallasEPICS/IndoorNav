@@ -12,7 +12,7 @@ export type { MapPosition }
 
 type MapPoint = { x: number, y: number, floor: number } // fractions (0–1) of that floor's map, like the rooms' x/y
 
-/** Floors with a route grid (public/data/SPN.txt and SPN-level2.txt) */
+/** Floors with a route grid (public/data/SPN-level1.txt and SPN-level2.txt) */
 const ROUTABLE_FLOORS = [1, 2]
 
 /** A position older than this is dropped, so the dot doesn't sit still after we stop hearing beacons */

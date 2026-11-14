@@ -34,7 +34,7 @@ cad-source/SPN-level-1.dwg   (private, gitignored — never commit)
   └─ dwg2dxf ─► .dxf
        └─ scripts/cad-to-svg.py ─► public/maps/spn-level1.svg        (only navigation layers: walls, doors, stairs, glass, room labels)
                                 └► public/maps/spn-level1-rooms.json  ([{ number, name, x, y }])
-public/data/SPN.txt                544 × 848 grid of 0/1 cells (0 = open, 1 = wall) that the app routes on for level 1 (Map generation workstream)
+public/data/SPN-level1.txt                544 × 848 grid of 0/1 cells (0 = open, 1 = wall) that the app routes on for level 1 (Map generation workstream)
 public/data/SPN-level2.txt         same format, level 2 (added 2026-10-30; the source picture included furniture, so rooms contain extra wall cells)
 public/data/spn-level1-grid.json   226 × 478 matrix, not used by the app (ask Bao before relying on or deleting it)
 ```

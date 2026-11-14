@@ -12,7 +12,7 @@ export interface Grid {
   walls: Uint8Array // every cell, row after row: 1 = wall, 0 = open
 }
 
-/** Reads SPN.txt-style text (rows of 0/1, spaced like "0 1 0" or packed like "010") into a Grid. */
+/** Reads SPN-level1.txt-style text (rows of 0/1, spaced like "0 1 0" or packed like "010") into a Grid. */
 export function parseGrid(text: string): Grid {
   const lines = text.split('\n')
     .map(line => line.replace(/[\s,]/g, '')) // "0 1 0" and "0,1,0" -> "010"

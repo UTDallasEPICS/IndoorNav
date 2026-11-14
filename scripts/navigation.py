@@ -11,7 +11,7 @@ Usage:
     pip install -r scripts/requirements.txt
     python scripts/navigation.py [--plot]
 
-Reads public/data/SPN.txt (the level 1 grid the app routes on) and
+Reads public/data/SPN-level1.txt (the level 1 grid the app routes on) and
 nav_io/coords.txt (next to this script) and writes the path to
 nav_io/path.txt. --plot shows the path on the grid (needs matplotlib). coords.txt holds two lines: start as row,col, then
 destination as row,col. Movement is 8-directional (diagonals allowed, no
@@ -33,7 +33,7 @@ except ImportError:  # pure-Python fallback is used instead (slower)
 SQRT2 = math.sqrt(2.0)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FILE = os.path.join(BASE_DIR, "..", "public", "data", "SPN.txt")  # the same grid the app routes on
+INPUT_FILE = os.path.join(BASE_DIR, "..", "public", "data", "SPN-level1.txt")  # the same grid the app routes on
 COORDS_FILE = os.path.join(BASE_DIR, "nav_io", "coords.txt")
 OUTPUT_FILE = os.path.join(BASE_DIR, "nav_io", "path.txt")
 DIAGONAL = True

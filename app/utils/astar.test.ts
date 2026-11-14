@@ -67,7 +67,7 @@ describe('findPath', () => {
   })
 
   it('matches scripts/navigation.py on the real level 1 grid (re-run the script after changing either)', () => {
-    const spn = parseGrid(readFileSync('public/data/SPN.txt', 'utf8'))
+    const spn = parseGrid(readFileSync('public/data/SPN-level1.txt', 'utf8'))
     const toCells = (text: string) => text.trim().split('\n').map(line => line.split(',').map(Number) as Cell)
     const [start, goal] = toCells(readFileSync('scripts/nav_io/coords.txt', 'utf8'))
     const expected = toCells(readFileSync('scripts/nav_io/path.txt', 'utf8'))

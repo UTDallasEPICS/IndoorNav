@@ -7,7 +7,7 @@ import { nearestOpenCell } from './nearest-open-cell'
 type MapPoint = { x: number, y: number } // fractions (0–1) of the floor plan, like the rooms' x/y
 
 /** Each floor's route grid file (0/1 cells, 0 = open, 1 = wall) */
-const GRID_FILES: Record<number, string> = { 1: '/data/SPN.txt', 2: '/data/SPN-level2.txt' }
+const GRID_FILES: Record<number, string> = { 1: '/data/SPN-level1.txt', 2: '/data/SPN-level2.txt' }
 
 const gridLoads = new Map<number, Promise<Grid>>() // the route grid per floor, shared by every page so each is only loaded once
 
