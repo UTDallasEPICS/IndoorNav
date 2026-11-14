@@ -54,7 +54,10 @@ const LEVEL2_CORNERS = [
   { lat: 32.99339068988021, lon: -96.75250562885526, x: 1, y: 1 }
 ]
 
-/** Floor-to-floor height. Not measured: a typical 14 ft. Only affects reported heights, not 2D positions */
+/**
+ * Floor-to-floor height. Not measured: a typical 14 ft. Only affects reported heights, not 2D positions. On a
+ * device, floors.elevation_m in the database (seeded from app/db/seed.ts) replaces it; the barometer uses that.
+ */
 const LEVEL2_FLOOR_Z = 4.27
 
 export const SPN_LEVEL2_FIT = fitFloorTransform(

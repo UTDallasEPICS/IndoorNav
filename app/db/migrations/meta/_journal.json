@@ -15,6 +15,13 @@
       "when": 1792798751035,
       "tag": "0001_beacon_surveys",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794455014411,
+      "tag": "0002_floor_elevation",
+      "breakpoints": true
     }
   ]
 }

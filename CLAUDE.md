@@ -193,6 +193,12 @@ Decision drivers to respect:
   - 2026-10-23: `app/composables/useNavigation.ts` wired into `map.vue` (live `MapPosition` + `routeTo`), with
     beacons loaded from the on-device DB. Not yet verified on a device.
 - [ ] Floor change detection switches to the matching floor plan (barometer where available). *Milestone: Nov 13*
+  - 2026-11-11: barometer floor tracking (`@capgo/capacitor-barometer`, `providers/barometer/`): BLE vote anchors
+    it, then the barometer picks the floor (stops stair bleed, handles elevators), drift corrected while BLE agrees;
+    phones without one keep the BLE vote. Floor heights in the DB (`floors.elevation_m`). Test readout on the map
+    (`SHOW_BAROMETER_DEBUG`, off by default).
+  - 2026-11-12: tested on an iPhone in SPN1: the barometer switched floors. SPN1's 4.27 m floor height still not
+    measured; Android not yet tested on a device.
 - [ ] Test plan running alongside development: multi-path routes, elevator/stairs, location updates while walking.
 
 ### Mobile interface — Sneha (C01, R03)

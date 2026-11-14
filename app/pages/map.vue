@@ -144,6 +144,15 @@
       </button>
     </div>
 
+    <!-- Barometer readout for testing floor changes (SHOW_BAROMETER_DEBUG). Remove before release. -->
+    <div v-if="SHOW_BAROMETER_DEBUG" class="baro-debug" aria-hidden="true">
+      <template v-if="barometerReading?.pressureHpa">
+        <div>{{ barometerReading.pressureHpa.toFixed(2) }} hPa · {{ formatHeight(barometerReading.heightM) }} · {{ formatSpeed(barometerReading.verticalSpeedMps) }}</div>
+        <div>Baro floor {{ barometerReading.floorLevel ?? '–' }} · BLE {{ barometerReading.voteLevel ?? '–' }}<template v-if="barometerReading.voteShare != null"> ({{ Math.round(barometerReading.voteShare * 100) }}%)</template></div>
+      </template>
+      <div v-else>Barometer: {{ barometerStatus }}<template v-if="barometerMessage"> – {{ barometerMessage }}</template></div>
+    </div>
+
     <!-- Bottom sheet: searches the destination, or sets your location by hand -->
     <section ref="sheet" class="sheet">
       <!-- Set-location button rides on top of the sheet, on the left -->
@@ -255,7 +264,13 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { loadRouteGrid } from '~/utils/route-between'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
-const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo } = useNavigation()
+const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo, barometerStatus, barometerMessage, barometerReading } = useNavigation()
+
+// Barometer readout (top left) for testing floor changes on a phone: pressure, height above level 1, vertical
+// speed, and the barometer's floor next to the BLE vote's. Set to false (or delete the readout) before release.
+const SHOW_BAROMETER_DEBUG = false
+const formatHeight = heightM => (heightM == null ? 'not anchored' : `${heightM.toFixed(2)} m`)
+const formatSpeed = speed => (speed == null ? '– m/s' : `${speed >= 0 ? '+' : ''}${speed.toFixed(2)} m/s`)
 
 const mapContainer = ref(null) // ref(): a value the page reacts to; read/write it as .value. Here Vue fills it with the <main ref="mapContainer"> element
 const mapImage = ref(null) // the <img> floor plan
@@ -1148,6 +1163,23 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 
 .floor-toggle button:disabled {
   cursor: default;
+}
+
+.baro-debug {
+  position: absolute;
+  top: max(16px, env(safe-area-inset-top));
+  left: 16px;
+  max-width: calc(100% - 140px); /* clear of the floor switcher */
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+  color: var(--color-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  pointer-events: none; /* never blocks map drags */
 }
 
 .map-controls {
