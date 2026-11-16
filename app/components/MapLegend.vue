@@ -7,7 +7,11 @@
         <button class="close" type="button" aria-label="Close legend" @click="emit('close')">✕</button> <!-- tells map.vue to close it -->
       </div>
 
-      <ul class="legend-list"> <!-- areas: one per row -->
+      <ul
+        class="legend-list"
+        :style="{ gridTemplateRows: `repeat(${Math.ceil(areaRows.length / 2)}, auto)` }"
+      > <!-- areas in two columns filled top to bottom: first half on the left, second half on the right -->
+
         <li v-for="row in areaRows" :key="row.label" class="legend-row">
           <span class="swatch area" :style="{ '--c': row.color }" />
           {{ row.label }}
@@ -98,6 +102,10 @@ const pointRows = computed(() => props.rows.filter(row => row.type === 'point'))
 }
 
 .legend-list {
+  display: grid;
+  grid-auto-flow: column; /* fill down the left column, then the right (rows set inline from the count) */
+  grid-template-columns: 1fr 1fr;
+  column-gap: 16px;
   margin: 0;
   padding: 0;
   list-style: none;
