@@ -16,6 +16,9 @@ export const floors = sqliteTable('floors', {
   svg_path: text('svg_path').notNull(),   // e.g. /maps/spn-level1.svg
   grid_path: text('grid_path').notNull(), // e.g. /data/spn-level1-grid.json
   meters_per_cell: real('meters_per_cell'), // unknown until the grid scale is confirmed
+  // Height of this floor's walking surface above the building's ground floor, in meters. The barometer tells
+  // floors apart by these differences; null = unknown (the location module keeps its built-in value)
+  elevation_m: real('elevation_m'),
 }, (t) => [
   // can't have two of the same level!
   unique().on(t.building_id, t.level),

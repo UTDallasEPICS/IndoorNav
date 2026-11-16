@@ -82,7 +82,8 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
 ```
 CapacitorBleScanner ─ BeaconAdvert ─► BleProvider
                                         RssiFilterBank (median → 1D Kalman, stale eviction)
-                                        voteFloor (strongest beacons vote)
+                                        voteFloor (strongest beacons vote) ◄── floor ── BarometerProvider
+                                                                            BarometerFloorTracker ◄─ CapacitorPressureSource
                                         rssiToDistance (log-distance path loss)
                                         estimator: weightedCentroid | leastSquares
                                         └─► LocationFix (source 'ble') ─┐
@@ -108,10 +109,12 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
 | --- | --- | --- |
 | `types.ts`, `emitter.ts`, `venue.ts` | Shared types, a tiny event emitter, venue lookup tables | no |
 | `beaconRegistry.ts` | Stored (WGS84) beacons → `BeaconRegistryEntry` (ENU) | no |
+| `floorRegistry.ts` | Stored floor heights (`floors.elevation_m`) → each floor's `transform.floorZ` | no |
 | `geo/` | WGS84/ECEF/ENU, floor plan ↔ ENU, point-in-polygon | no |
 | `providers/ble/` | Scanner interface + mock, Eddystone parsing, RSSI filter, path loss, estimators, floor vote, `BleProvider` | only `capacitorScanner.ts` |
 | `providers/gps/` | GPS source interface + mock, `GpsProvider` | only `capacitorGpsSource.ts` |
 | `providers/pdr/` | Motion source interface + mock, step detector, compass heading, `PdrProvider` | only `capacitorMotionSource.ts` |
+| `providers/barometer/` | Pressure source interface + mock, `BarometerFloorTracker`, `BarometerProvider` | only `capacitorPressureSource.ts` |
 | `fusion/` | Kalman filter, indoor/outdoor detector, `FusionEngine` | no |
 | `sim/` | Synthetic RSSI/GPS generator, pipeline runner, error report | no |
 | `fixtures/` | **Placeholder** sample venue (1 building, 2 floors, 12 beacons) and walk | no |
@@ -128,6 +131,9 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
 - `StepKalman` (`fusion/stepKalman.ts`): `stationaryMeasurementScale` and `stationaryNoise` (how hard the dot holds
   still while you stand), `movingNoise`, `gateChi2` / `relocalizeAfter` (outlier rejection).
 - `PdrProvider` options: step `thresholdMs2` / `weinbergK`, `headingSmoothingMs`, `defaultHeadingAccuracyDeg`.
+- `BarometerFloorTracker` options (`providers/barometer/floorTracker.ts`): `switchFraction` (0.6 of the way to the
+  next floor) and `dwellMs` (1.5 s) for switching, `minVoteShare` (0.8) and `anchorAfterMs` (3 s) for trusting BLE,
+  `reanchorAfterMs` (20 s), `driftTimeConstantMs` (30 s). Floor heights are `floors.elevation_m` in the database.
 
 ## Smoothing with steps and compass (PDR)
 
@@ -151,6 +157,27 @@ While the accelerometer and compass run, `FusionEngine` switches from the consta
 PDR assumes the phone is held in front, roughly pointing the way you walk. A phone in a pocket still counts steps,
 but its compass heading is wrong; the gate + relocalize logic limits the damage. iOS asks for motion permission,
 which must happen during a tap: `useNavigation().startLocation()` calls `requestMotionPermission()` first thing.
+
+## Floor detection with the barometer
+
+Near stairs, beacons from the floor above or below can win the BLE floor vote, so the floor used to flip back and
+forth. Where the phone has a barometer, it picks the floor instead (`BleProvider.setFloorSelector`):
+
+- **Pressure → height.** About 0.12 hPa per meter, so a floor (~4.3 m in SPN1) is ~0.5 hPa. Heights are smoothed
+  (Android's sensor is raw and noisy) and compared with each floor's height from `floors.elevation_m`.
+- **BLE anchors it.** The barometer only knows *changes* in height. Once BLE has confidently voted for the same floor
+  (≥ 80% of the vote) for 3 s while the height is steady, the tracker decides "this height is that floor". Until
+  then, and whenever the barometer is silent for 5 s, the BLE vote picks the floor as before.
+- **Then the barometer decides.** The floor switches once the height is 60% of the way to another floor and stays
+  there for 1.5 s, whatever BLE says, so stair bleed can't flip it, and an elevator ride (no beacons in the car)
+  arrives on the right floor. Only that floor's beacons are used for the 2D position.
+- **BLE keeps it honest.** Weather moves pressure by ~1 hPa per hour (two floors' worth). While BLE agrees, the
+  height is pulled back onto the floor (30 s time constant). If BLE confidently disagrees for 20 s while the height
+  is steady, the tracker re-anchors to BLE (it anchored to the wrong floor, or drifted too far).
+- **No barometer** (some Android phones), or iOS Motion & Fitness permission declined: the BLE vote alone, as before.
+
+A new building needs only its floors' `elevation_m` rows: the tracker reads the floors of whichever building the
+vote is in.
 
 ## Adding a provider (e.g. the Mist SDK)
 
@@ -195,5 +222,8 @@ in SPN1 (see the CSV/checkpoint success criterion in CLAUDE.md).
 - **Heading** comes from the compass while the motion sensors run, otherwise from the GPS course or the fused
   velocity. Not yet checked on a device: compass accuracy inside SPN1, Android `deviceorientationabsolute` in the
   WebView, and step detection thresholds for different phones/gaits.
+- **Barometer:** not tested on a device yet. SPN1's floor-to-floor height (4.27 m) is a guess: measure it (pressure
+  at the bottom and top of the stairs, ~0.12 hPa per meter) and update `elevation_m` in `app/db/seed.ts`. Opening
+  doors and the building's air handling may cause small pressure jumps; check they stay well under 60% of a floor.
 - **Walls:** nothing yet stops the dot from crossing a wall. A particle filter on the route grid
   (`EXTENSION POINT (particle filter)`) is the natural next step.
