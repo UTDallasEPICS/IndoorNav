@@ -98,7 +98,9 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
                                                                  2-of-3 vote, 3 s hysteresis)
                                           indoors: BLE drives position (GPS only if no beacons heard)
                                           outdoors: GPS drives position
-                                          motion sensors running: StepKalman (steps move, BLE corrects)
+                                          motion sensors running: ParticleFilter on floors with a route grid
+                                                                  (steps move, walls prune, BLE corrects),
+                                                                  StepKalman elsewhere
                                           otherwise:              ConstantVelocityKalman (accuracy-weighted)
                                           └─► LocationFix ('fused') + LocationEvents
                                                                        ▼
@@ -181,6 +183,37 @@ PDR assumes the phone is held in front, roughly pointing the way you walk. A pho
 but its compass heading is wrong; the gate + relocalize logic limits the damage. iOS asks for motion permission,
 which must happen during a tap: `useNavigation().startLocation()` calls `requestMotionPermission()` first thing.
 
+## Keeping the dot out of walls (particle filter)
+
+On a floor with a route grid (`Floor.walkGrid`, attached by `withFloorGrids`; `useNavigation` loads
+`public/data/SPN*.txt` with `GRID_BOUNDS`), `FusionEngine` uses `ParticleFilter` (`fusion/particleFilter.ts`)
+instead of `StepKalman`. Same inputs, same error model; it just also knows the walls (`fusion/walkableMap.ts`):
+
+- **800 guesses of where you are.** Each step moves every guess along the compass with its own heading and length
+  error. A guess whose step crosses a wall keeps 5% of its weight (`wallCrossWeight`), so the cloud stays on the
+  side of a wall your steps could reach. BLE fixes reweight the guesses by their error ellipse.
+- **The dot is the cloud's mean**, or the nearest open-floor guess if the mean lands in a wall.
+- **Not zero, on purpose.** If the grid is missing a door, the guesses that walk through it carry on, and BLE decides.
+  Fixes far from the cloud are dropped, and after 4 in a row the cloud restarts around them (e.g. it was walled
+  into the wrong room).
+- **Two details matter** (found by replaying the same inputs into both filters): random heading error shortens the
+  cloud's average step by `cos`, so steps are stretched by `exp(sigma^2 / 2)`, or the dot lags; and resampled copies
+  are nudged apart by 0.3 m (`resampleJitterM`), or walls shrink the cloud until it ignores BLE.
+- `FusionOptions.stepFilterKind` forces `'kalman'` or `'particle'`. Floors without a grid (and outdoors) use
+  StepKalman.
+
+Simulator, 4 A* routes on SPN1 level 1 with the surveyed APs (`sim/spnWalk.ts`), 8 seeds, after the first 15 s:
+
+| | StepKalman | ParticleFilter |
+| --- | --- | --- |
+| Mean error | 2.85 m | 2.68 m |
+| p90 error | 5.3 m | 5.8 m |
+| Jitter per second | 0.75 m | 0.95 m |
+| Times the dot crosses a wall, per ~70 s walk | 108 | 22 |
+| Fixes inside a wall | 21% | 0% |
+
+Cost: ~3× the CPU of StepKalman (about 0.1 s per minute of walking in Node), fine on a phone.
+
 ## Floor detection with the barometer
 
 Near stairs, beacons from the floor above or below can win the BLE floor vote, so the floor used to flip back and
@@ -212,8 +245,8 @@ vote is in.
 3. Add its id to `ProviderId` in `types.ts` and pass it to `new LocationService({ providers: [...] })`
    (or to `createDeviceLocationService`).
 4. Decide how `FusionEngine.ingest` should use it. `'mist'` fixes are already treated like BLE.
-   Relative inputs (like PDR) go through their own methods (`ingestStep`, `ingestMotion`). A particle filter can replace the Kalman filter by implementing
-   `PositionFilter` (`EXTENSION POINT (particle filter)` in `fusion/kalman.ts`).
+   Relative inputs (like PDR) go through their own methods (`ingestStep`, `ingestMotion`), which drive a
+   `StepFilter` (`fusion/stepKalman.ts`: StepKalman, or ParticleFilter with walls).
 5. Add tests using the mock and, if relevant, extend `sim/` to generate its readings.
 
 ## Running the simulator
@@ -251,5 +284,6 @@ in SPN1 (see the CSV/checkpoint success criterion in CLAUDE.md).
 - **BLE fix model:** the strongest-beam reading, `rssiFit` and the device offset are only checked in the simulator,
   whose beam pattern (9 beams, 12 dB spread) is a guess. Check on a device that standing under a `good` AP reads
   about 5 dB under its `tx_power_dbm` (1.5 m below it, n ~2.7), and log the offset on an iPhone and an Android.
-- **Walls:** nothing yet stops the dot from crossing a wall. A particle filter on the route grid
-  (`EXTENSION POINT (particle filter)`) is the natural next step.
+- **Walls:** the particle filter is only checked in the simulator, on routes the same grid produced. The real grids
+  have gaps: on level 1 the interior is one connected area, but only 5 rooms connect to vestibule 1.001; level 2's
+  grid has furniture in rooms. Watch for the dot hanging at a doorway on a device.

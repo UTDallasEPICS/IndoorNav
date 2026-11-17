@@ -170,6 +170,9 @@ Decision drivers to respect:
     read as its strongest vBLE beam per second, position fitted in dB with outlier capping and an error ellipse,
     per-phone RSSI offset tracked. Simulator with 9 beams + 4 dB shadowing: mean error 8.3 → 2.0 m, per-second
     jitter 5.2 → 0.6 m. Not yet verified on a device.
+  - 2026-11-17: wall-aware particle filter on the route grids (`fusion/particleFilter.ts`, used where a floor has a
+    grid). Simulated SPN1 level 1 routes: wall crossings 108 → 22 per walk, 0% of fixes inside walls, mean error
+    2.85 → 2.68 m (p90 5.3 → 5.8 m). Not yet verified on a device.
 - [ ] Monitor beacon namespace/instance IDs for changes on OIT's side.
 - [ ] (Future-proofing) vSLAM locating reaches ≥ 60% of BLE precision in ideal conditions (no people around).
 

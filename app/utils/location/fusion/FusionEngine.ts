@@ -26,8 +26,11 @@ export interface FusionOptions {
   stepKalman: StepKalmanOptions
   /** The filter used while motion sensors run on a floor with a route grid */
   particleFilter: ParticleFilterOptions
-  /** Use the floors' route grids to keep the dot out of walls (needs Floor.walkGrid) */
-  useWalls: boolean
+  /**
+   * The filter used while motion sensors run: 'auto' is the particle filter where a floor has a route grid
+   * (Floor.walkGrid) to keep the dot out of walls, otherwise StepKalman.
+   */
+  stepFilterKind: 'auto' | 'kalman' | 'particle'
   indoorOutdoor: IndoorOutdoorOptions
   /** Below this speed (m/s) the heading is taken from the provider instead of the velocity */
   minSpeedForHeading: number
@@ -41,7 +44,7 @@ export const DEFAULT_FUSION: FusionOptions = {
   kalman: DEFAULT_KALMAN,
   stepKalman: DEFAULT_STEP_KALMAN,
   particleFilter: DEFAULT_PARTICLE_FILTER,
-  useWalls: true,
+  stepFilterKind: 'auto',
   indoorOutdoor: DEFAULT_INDOOR_OUTDOOR,
   minSpeedForHeading: 0.5,
   motionTimeoutMs: 2000,
@@ -69,7 +72,8 @@ export class FusionEngine {
     this.filter = new ConstantVelocityKalman(this.options.kalman)
     const walls = createWalkableMap(venue)
     const anyGrid = [...this.index.floors.keys()].some((id) => walls.hasFloor(id))
-    this.stepFilter = this.options.useWalls && anyGrid
+    const kind = this.options.stepFilterKind
+    this.stepFilter = kind === 'particle' || (kind === 'auto' && anyGrid)
       ? new ParticleFilter(walls, this.options.particleFilter)
       : new StepKalman(this.options.stepKalman)
     this.detector = new IndoorOutdoorDetector(this.index.footprints, this.options.indoorOutdoor)

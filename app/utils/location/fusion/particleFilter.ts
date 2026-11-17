@@ -1,18 +1,18 @@
-// Position filter that knows where the walls are. Used instead of StepKalman while the motion sensors run and the
-// floor has a route grid.
+// Position filter that knows where the walls are. Used instead of StepKalman while the motion sensors run on a floor
+// with a route grid.
 //
-// A few hundred guesses ("particles") of where the user is:
-// - Each step moves every particle by the step's length along the compass heading, each with its own small
-//   heading and step-length error (and a slowly varying compass bias, as near steel). A particle whose step goes
-//   through a wall is almost certainly wrong, so it nearly loses its weight and soon disappears.
-// - A BLE fix reweights particles by how well they agree with it (its error ellipse), and the unlikely ones are
-//   replaced by copies of the likely ones (resampling).
-// - So the cloud ends up in hallways and rooms, on the side of a wall the user's steps could actually reach, and the
-//   dot (the cloud's mean) follows corridors instead of cutting through offices.
+// Several hundred guesses ("particles") of where the user is:
+// - Each step moves every particle by the step's length along the compass heading, each with its own random heading
+//   and length error (the same error model as StepKalman). A particle whose step goes through a wall is almost
+//   certainly in the wrong place, so it keeps only a sliver of its weight and soon disappears.
+// - A BLE fix reweights particles by how well they agree with it (its error ellipse). When a few particles carry
+//   most of the weight, the cloud is redrawn from them (resampling), with the copies nudged apart a little.
+// - So the cloud stays in hallways and rooms, on the side of a wall the user's steps could actually reach, and the dot
+//   follows corridors instead of cutting through offices.
 //
 // Like StepKalman: fixes far from the cloud are dropped, and if several in a row are, the filter assumes it's lost
-// and restarts around them. If every particle hits a wall (the grid is missing a door), the walls are ignored for
-// that step, so a map error can't freeze the dot.
+// (e.g. walled into the wrong room) and restarts around them. A wall missing a door on the map slows the dot down
+// rather than stopping it: the particles that cross are only down-weighted.
 
 import { createRng, type Rng } from '../random'
 import type { StepFilter, StepFilterCovariance } from './stepKalman'
@@ -20,36 +20,30 @@ import type { WalkableMap } from './walkableMap'
 
 export interface ParticleFilterOptions {
   particles: number
-  /** Position random-walk noise between steps while walking (m^2/s): covers missed steps */
+  /** Position random-walk noise between steps while walking (m^2/s per axis, as StepKalman): covers missed steps */
   movingNoise: number
-  /** Position random-walk noise while standing still (m^2/s) */
+  /** Position random-walk noise while standing still (m^2/s per axis) */
   stationaryNoise: number
   /** BLE variance multiplier while standing still (as StepKalman) */
   stationaryMeasurementScale: number
-  /** 1-sigma step length error as a fraction of the step, per step */
+  /** 1-sigma step length error as a fraction of the step */
   stepLengthError: number
-  /** 1-sigma error of a particle's step length scale (this user's stride vs the estimate) */
-  stepScaleSigma: number
-  /** 1-sigma per-particle compass bias, and how much it wanders per step (degrees) */
-  headingBiasSigmaDeg: number
-  headingBiasWalkDeg: number
-  /** Weight kept by a particle whose step crosses a wall */
+  /**
+   * Weight kept by a particle whose step crosses a wall. Not zero: if the map is missing a door, the particles that
+   * went through it carry on, and BLE decides.
+   */
   wallCrossWeight: number
-  /** Gate: drop BLE fixes whose squared Mahalanobis distance from the cloud exceeds this (2 dof) */
+  /**
+   * After resampling, copies of one particle are nudged apart by this much (1 sigma, m), staying on open floor.
+   * Walls trim the cloud every step; without this it shrinks to a few copies and stops listening to BLE.
+   */
+  resampleJitterM: number
+  /** Gate: drop BLE fixes whose squared Mahalanobis distance from the cloud exceeds this (2 dof: 13.8 ~ 99.9%) */
   gateChi2: number
   /** Restart around the average of this many dropped fixes in a row */
   relocalizeAfter: number
   /** Restart from the next fix after this long without any input (ms) */
   maxGapMs: number
-  /**
-   * Share of particles redrawn around each BLE fix. Lets the cloud get out of a room it was wrongly walled into
-   * (a bad first fix, missed steps), since steps alone can never cross the wall.
-   */
-  injectFraction: number
-  /** ...but only for fixes this far from the cloud (squared Mahalanobis distance): agreeing fixes would just add noise */
-  injectAboveChi2: number
-  /** Per-step heading noise as a fraction of the step's heading accuracy (the rest is the slowly varying bias) */
-  headingStepNoise: number
   /** The cloud starts at least this spread out (1 sigma, m), however confident the first fix claims to be */
   minSeedAccuracyM: number
   /** Random seed, so runs are repeatable */
@@ -57,21 +51,16 @@ export interface ParticleFilterOptions {
 }
 
 export const DEFAULT_PARTICLE_FILTER: ParticleFilterOptions = {
-  particles: 400,
-  movingNoise: 0.1,
+  particles: 800,
+  movingNoise: 0.15,
   stationaryNoise: 0.01,
   stationaryMeasurementScale: 4,
-  stepLengthError: 0.1,
-  stepScaleSigma: 0.1,
-  headingBiasSigmaDeg: 5,
-  headingBiasWalkDeg: 1,
-  wallCrossWeight: 0.01,
+  stepLengthError: 0.15,
+  wallCrossWeight: 0.05,
+  resampleJitterM: 0.3,
   gateChi2: 13.8,
   relocalizeAfter: 4,
   maxGapMs: 10000,
-  injectFraction: 0,
-  injectAboveChi2: 6,
-  headingStepNoise: 0.5,
   minSeedAccuracyM: 4,
   seed: 1
 }
@@ -85,8 +74,6 @@ export class ParticleFilter implements StepFilter {
   private pe: Float64Array
   private pn: Float64Array
   private weight: Float64Array
-  private headingBias: Float64Array
-  private stepScale: Float64Array
   private live = false
   private lastTimestamp: number | null = null
   private moving = false
@@ -100,8 +87,6 @@ export class ParticleFilter implements StepFilter {
     this.pe = new Float64Array(this.n)
     this.pn = new Float64Array(this.n)
     this.weight = new Float64Array(this.n)
-    this.headingBias = new Float64Array(this.n)
-    this.stepScale = new Float64Array(this.n)
   }
 
   /** Which floor's walls apply. A change scatters the cloud onto open floor of the new floor. */
@@ -110,13 +95,13 @@ export class ParticleFilter implements StepFilter {
     this.floorId = floorId
     const s = this.state()
     if (!s || this.lastTimestamp === null) return
-    this.scatter(s.e, s.n, { ee: s.accuracyM ** 2 / 2 + 1, en: 0, nn: s.accuracyM ** 2 / 2 + 1 }, this.lastTimestamp)
+    const v = s.accuracyM ** 2 / 2 + 1
+    this.scatter(s.e, s.n, { ee: v, en: 0, nn: v }, this.lastTimestamp)
   }
 
   seed(e: number, n: number, accuracyM: number, timestamp: number) {
     const a = Math.max(accuracyM, this.options.minSeedAccuracyM)
-    const v = a * a / 2
-    this.scatter(e, n, { ee: v, en: 0, nn: v }, timestamp)
+    this.scatter(e, n, { ee: a * a / 2, en: 0, nn: a * a / 2 }, timestamp)
   }
 
   setMoving(moving: boolean) {
@@ -128,29 +113,26 @@ export class ParticleFilter implements StepFilter {
     this.moving = true
     this.predictTo(timestamp)
     const o = this.options
-    const fromE = new Float64Array(this.pe)
-    const fromN = new Float64Array(this.pn)
-    let keptWeight = 0
-    let totalWeight = 0
+    // A step off by angle x only goes cos(x) of the way forward, and E[cos x] = exp(-sigma^2 / 2): lengthen every step
+    // to make up for it, or the cloud's average step comes out short and the dot lags behind the walker.
+    const headingSigma = Math.min(headingAccuracyDeg, 90) * RAD
+    const stretch = headingDeg === null ? 1 : Math.exp(headingSigma * headingSigma / 2)
+    let crossings = 0
     const crossed = new Uint8Array(this.n)
     for (let i = 0; i < this.n; i++) {
-      this.headingBias[i]! += this.rng.gaussian() * o.headingBiasWalkDeg
-      const length = lengthM * this.stepScale[i]! * (1 + this.rng.gaussian() * o.stepLengthError)
+      const length = stretch * lengthM * (1 + this.rng.gaussian() * o.stepLengthError)
       // Without a compass the step went somewhere within a circle
-      const heading = headingDeg === null
-        ? this.rng.uniform() * 360
-        : headingDeg + this.headingBias[i]! + this.rng.gaussian() * headingAccuracyDeg * o.headingStepNoise
-      this.pe[i] = fromE[i]! + length * Math.sin(heading * RAD)
-      this.pn[i] = fromN[i]! + length * Math.cos(heading * RAD)
-      totalWeight += this.weight[i]!
-      if (this.map.canWalk(this.floorId, { e: fromE[i]!, n: fromN[i]! }, { e: this.pe[i]!, n: this.pn[i]! })) {
-        keptWeight += this.weight[i]!
-      } else {
+      const heading = headingDeg === null ? this.rng.uniform() * 360 : headingDeg + this.rng.gaussian() * headingAccuracyDeg
+      const from = { e: this.pe[i]!, n: this.pn[i]! }
+      this.pe[i] = from.e + length * Math.sin(heading * RAD)
+      this.pn[i] = from.n + length * Math.cos(heading * RAD)
+      if (!this.map.canWalk(this.floorId, from, { e: this.pe[i]!, n: this.pn[i]! })) {
         crossed[i] = 1
+        crossings++
       }
     }
-    // If (nearly) every particle hit a wall, the map is probably missing an opening: ignore it this step
-    if (keptWeight < 0.01 * totalWeight) return
+    // If nearly every particle walked through a wall, the map is probably missing an opening: let it go this step
+    if (crossings === 0 || crossings > 0.99 * this.n) return
     for (let i = 0; i < this.n; i++) if (crossed[i]) this.weight[i]! *= o.wallCrossWeight
     this.normalizeAndResample()
   }
@@ -158,11 +140,10 @@ export class ParticleFilter implements StepFilter {
   update(e: number, n: number, accuracyM: number, timestamp: number, covariance?: StepFilterCovariance) {
     const scale = this.moving ? 1 : this.options.stationaryMeasurementScale
     const r = accuracyM * accuracyM / 2
-    const cov = covariance
-      ? { ee: covariance.ee * scale, en: covariance.en * scale, nn: covariance.nn * scale }
-      : { ee: r * scale, en: 0, nn: r * scale }
+    const base = covariance ?? { ee: r, en: 0, nn: r }
+    const cov = { ee: base.ee * scale, en: base.en * scale, nn: base.nn * scale }
     if (!this.live || this.lastTimestamp === null || timestamp - this.lastTimestamp > this.options.maxGapMs) {
-      this.seed(e, n, Math.max(accuracyM, Math.sqrt(covariance ? covariance.ee + covariance.nn : 2 * r)), timestamp)
+      this.seed(e, n, Math.sqrt(base.ee + base.nn), timestamp)
       return
     }
     this.predictTo(timestamp)
@@ -182,7 +163,6 @@ export class ParticleFilter implements StepFilter {
       return
     }
     this.rejected = []
-    if (d2 > this.options.injectAboveChi2) this.inject(e, n, covariance ?? { ee: r, en: 0, nn: r })
 
     const rdet = cov.ee * cov.nn - cov.en * cov.en
     const iee = cov.nn / rdet
@@ -207,7 +187,7 @@ export class ParticleFilter implements StepFilter {
     const s = this.moments()
     let e = s.e
     let n = s.n
-    // The mean of a cloud split by a wall can land in the wall: show the particle nearest to it instead
+    // The mean of a cloud split by a wall can land in the wall: show the open-floor particle nearest to it instead
     if (!this.map.isOpen(this.floorId, e, n)) {
       let best = Infinity
       for (let i = 0; i < this.n; i++) {
@@ -233,51 +213,40 @@ export class ParticleFilter implements StepFilter {
     return Array.from({ length: this.live ? this.n : 0 }, (_, i) => ({ e: this.pe[i]!, n: this.pn[i]!, weight: this.weight[i]! }))
   }
 
-  /** Spreads the particles over a Gaussian around (e, n), keeping to open floor where possible. */
+  /** Spreads the particles over a Gaussian around (e, n), on open floor where possible. */
   private scatter(e: number, n: number, cov: StepFilterCovariance, timestamp: number) {
-    for (let i = 0; i < this.n; i++) this.draw(i, e, n, cov, 1 / this.n)
+    // Cholesky of the 2x2 covariance
+    const a = Math.sqrt(Math.max(cov.ee, 1e-6))
+    const b = cov.en / a
+    const c = Math.sqrt(Math.max(cov.nn - b * b, 1e-6))
+    for (let i = 0; i < this.n; i++) {
+      let pe = e
+      let pn = n
+      for (let tries = 0; tries < 20; tries++) {
+        const z1 = this.rng.gaussian()
+        const z2 = this.rng.gaussian()
+        pe = e + a * z1
+        pn = n + b * z1 + c * z2
+        if (this.map.isOpen(this.floorId, pe, pn)) break
+      }
+      this.pe[i] = pe
+      this.pn[i] = pn
+      this.weight[i] = 1 / this.n
+    }
     this.live = true
     this.lastTimestamp = timestamp
     this.rejected = []
   }
 
-  /** Redraws `injectFraction` of the particles (at random) around the fix, at the average weight */
-  private inject(e: number, n: number, cov: StepFilterCovariance) {
-    const count = Math.round(this.options.injectFraction * this.n)
-    for (let k = 0; k < count; k++) this.draw(Math.floor(this.rng.uniform() * this.n), e, n, cov, 1 / this.n)
-  }
-
-  /** Puts particle i at a random spot of the Gaussian (e, n, cov), on open floor where possible, with fresh errors */
-  private draw(i: number, e: number, n: number, cov: StepFilterCovariance, weight: number) {
-    // Cholesky of the 2x2 covariance
-    const a = Math.sqrt(Math.max(cov.ee, 1e-6))
-    const b = cov.en / a
-    const c = Math.sqrt(Math.max(cov.nn - b * b, 1e-6))
-    let pe = e
-    let pn = n
-    for (let tries = 0; tries < 20; tries++) {
-      const z1 = this.rng.gaussian()
-      const z2 = this.rng.gaussian()
-      pe = e + a * z1
-      pn = n + b * z1 + c * z2
-      if (this.map.isOpen(this.floorId, pe, pn)) break
-    }
-    this.pe[i] = pe
-    this.pn[i] = pn
-    this.weight[i] = weight
-    this.headingBias[i] = this.rng.gaussian() * this.options.headingBiasSigmaDeg
-    this.stepScale[i] = 1 + this.rng.gaussian() * this.options.stepScaleSigma
-  }
-
   private predictTo(timestamp: number) {
     const dt = (timestamp - this.lastTimestamp!) / 1000
     if (dt <= 0) return
-    const sigma = Math.sqrt((this.moving ? this.options.movingNoise : this.options.stationaryNoise) * dt / 2)
+    const sigma = Math.sqrt((this.moving ? this.options.movingNoise : this.options.stationaryNoise) * dt)
     for (let i = 0; i < this.n; i++) {
       const pe = this.pe[i]! + this.rng.gaussian() * sigma
       const pn = this.pn[i]! + this.rng.gaussian() * sigma
-      // Drifting into a wall isn't a move anyone made: stay put instead
-      if (this.map.isOpen(this.floorId, pe, pn)) {
+      // Drifting into or through a wall isn't a move anyone made: stay put instead
+      if (this.map.canWalk(this.floorId, { e: this.pe[i]!, n: this.pn[i]! }, { e: pe, n: pn })) {
         this.pe[i] = pe
         this.pn[i] = pn
       }
@@ -320,8 +289,7 @@ export class ParticleFilter implements StepFilter {
 
     const pe = new Float64Array(this.n)
     const pn = new Float64Array(this.n)
-    const bias = new Float64Array(this.n)
-    const scale = new Float64Array(this.n)
+    const jitter = this.options.resampleJitterM
     const u0 = this.rng.uniform() / this.n
     let cumulative = this.weight[0]!
     let j = 0
@@ -330,13 +298,16 @@ export class ParticleFilter implements StepFilter {
       while (u > cumulative && j < this.n - 1) cumulative += this.weight[++j]!
       pe[i] = this.pe[j]!
       pn[i] = this.pn[j]!
-      bias[i] = this.headingBias[j]!
-      scale[i] = this.stepScale[j]!
+      if (jitter > 0) {
+        const to = { e: pe[i]! + this.rng.gaussian() * jitter, n: pn[i]! + this.rng.gaussian() * jitter }
+        if (this.map.canWalk(this.floorId, { e: pe[i]!, n: pn[i]! }, to)) {
+          pe[i] = to.e
+          pn[i] = to.n
+        }
+      }
     }
     this.pe = pe
     this.pn = pn
-    this.headingBias = bias
-    this.stepScale = scale
     this.weight.fill(1 / this.n)
   }
 

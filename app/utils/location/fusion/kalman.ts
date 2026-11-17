@@ -3,8 +3,8 @@
 
 /**
  * Anything that turns noisy absolute positions into a smooth track.
- * EXTENSION POINT (particle filter): a ParticleFilter implementing this interface can replace the Kalman
- * filter in FusionEngine; it could also use the floor grid to reject positions inside walls.
+ * Used without motion sensors. With them, FusionEngine uses a StepFilter instead (StepKalman, or ParticleFilter on
+ * floors with a route grid).
  */
 export interface PositionFilter {
   /** Adds a position measurement with a 1-sigma horizontal accuracy (meters) */
