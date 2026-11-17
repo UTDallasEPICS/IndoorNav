@@ -7,3 +7,6 @@ node_modules
 /.output
 /android
 /dist
+.vscode/settings.json
+__pycache__/pdf2image.cpython-312.pyc
+__pycache__/pdf2image.cpython-314.pyc
