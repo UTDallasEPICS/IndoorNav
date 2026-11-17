@@ -145,6 +145,42 @@ describe('BarometerFloorTracker', () => {
     expect(floors.at(-1)).toBe(L1)
   })
 
+  it('moves a wrong anchor on an unsure BLE majority (room off the atrium, level 2 heard through the opening)', () => {
+    // Level 2 wins confidently at startup, then level 1 leads most seconds but never confidently
+    const { floors } = run({
+      seconds: 60,
+      height: () => 0,
+      vote: (t) => (t < 5000 ? vote(L2) : t % 4000 === 0 ? vote(L2, 0.6) : vote(L1, 0.7))
+    })
+    expect(floors[4]).toBe(L2)
+    expect(floors[20]).toBe(L2) // not before a full window of evidence
+    const firstL1 = floors.indexOf(L1)
+    expect(firstL1).toBeGreaterThan(20)
+    expect(firstL1).toBeLessThanOrEqual(25)
+    expect(floors.slice(firstL1).every((f) => f === L1)).toBe(true)
+  })
+
+  it('keeps an anchor when the votes are split evenly between floors', () => {
+    const { floors } = run({
+      seconds: 120,
+      height: () => 0,
+      vote: (t) => (t < 5000 ? vote(L1) : (t / 1000) % 2 === 0 ? vote(L2, 0.7) : vote(L1, 0.7))
+    })
+    expect(floors.slice(3).every((f) => f === L1)).toBe(true)
+  })
+
+  it('needs confident votes to undo a floor change the barometer saw (stair bleed after climbing)', () => {
+    // Climbs to level 2, then stands still for a minute hearing level 1 slightly louder
+    const { floors } = run({
+      seconds: 90,
+      height: (t) => ramp(t, 5000, 10_000, 0, 4.27),
+      vote: (t) => (t < 5000 ? vote(L1) : vote(L1, 0.7))
+    })
+    const firstL2 = floors.indexOf(L2)
+    expect(firstL2).toBeGreaterThan(0)
+    expect(floors.slice(firstL2).every((f) => f === L2)).toBe(true)
+  })
+
   it('tracks an elevator ride with no beacons heard, across several floors', () => {
     // Sample building with a third floor at 9 m; ride from level 1 to 3 at 1 m/s, beacons blocked in the car
     const building = sampleVenue.buildings[0]!

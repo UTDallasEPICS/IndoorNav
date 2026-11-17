@@ -199,6 +199,10 @@ Decision drivers to respect:
     (`SHOW_BAROMETER_DEBUG`, off by default).
   - 2026-11-12: tested on an iPhone in SPN1: the barometer switched floors. SPN1's 4.27 m floor height still not
     measured; Android not yet tested on a device.
+  - 2026-11-17: fixed the floor sticking on level 2 in a room off the atrium (the first BLE vote heard level 2
+    through the opening and anchored the barometer there). A floor that's only BLE's anchor now moves on a 20 s
+    BLE majority; a floor the barometer climbed to still needs confident votes (`floorTracker.ts`, unit tests).
+    Not yet verified on a device.
 - [ ] Test plan running alongside development: multi-path routes, elevator/stairs, location updates while walking.
 
 ### Mobile interface — Sneha (C01, R03)
