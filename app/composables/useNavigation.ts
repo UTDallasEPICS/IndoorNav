@@ -6,8 +6,9 @@ import { Capacitor } from '@capacitor/core'
 import { readonly, ref } from 'vue'
 import { listBeacons } from '~/db/beacons'
 import { listFloors } from '~/db/floors'
-import { createDeviceLocationService, requestMotionPermission, spnVenue, withStoredBeacons, withStoredFloors, type BarometerReading, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
-import { routeBetween } from '~/utils/route-between'
+import { GRID_BOUNDS } from '#shared/grid-map'
+import { createDeviceLocationService, requestMotionPermission, spnVenue, withFloorGrids, withStoredBeacons, withStoredFloors, type BarometerReading, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
+import { loadRouteGrid, routeBetween } from '~/utils/route-between'
 
 export type { MapPosition }
 
@@ -83,6 +84,11 @@ export function useNavigation() {
     try {
       const db = await useDb()
       venue = withStoredBeacons(withStoredFloors(spnVenue, await listFloors(db)), await listBeacons(db))
+      // The route grids also keep the dot out of walls. A floor whose grid fails to load just isn't constrained.
+      const grids = await Promise.all(ROUTABLE_FLOORS.map(floor => loadRouteGrid(floor)
+        .then(grid => [floor, { grid, bounds: GRID_BOUNDS[floor as keyof typeof GRID_BOUNDS] }] as const)
+        .catch(() => null)))
+      venue = withFloorGrids(venue, Object.fromEntries(grids.filter(g => g !== null)))
     } catch (err) {
       if (service === created) {
         locationStatus.value = 'error'

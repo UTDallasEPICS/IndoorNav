@@ -6,7 +6,9 @@ import { BleProvider } from '../providers/ble/BleProvider'
 import { MockBleScanner } from '../providers/ble/scanner'
 import { GpsProvider } from '../providers/gps/GpsProvider'
 import { MockGpsSource } from '../providers/gps/gpsSource'
+import { createWalkableMap } from '../fusion/walkableMap'
 import { DEFAULT_SIM, errorReport, generateAdverts, runSimulation, truthAt } from './simulator'
+import { spnLevel1, spnRouteWalk } from './spnWalk'
 
 describe('simulator building blocks', () => {
   it('interpolates the ground truth between waypoints', () => {
@@ -108,6 +110,27 @@ describe('end-to-end simulated walk', () => {
       expect(tracked).toBeLessThan(untracked)
     }
   })
+
+  it('on real SPN1 routes, the walls keep the dot in hallways without costing accuracy', async () => {
+    const { venue } = spnLevel1()
+    const walls = createWalkableMap(venue)
+    const stats = { kalman: { error: 0, crossings: 0 }, particle: { error: 0, crossings: 0, inWall: 0 } }
+    for (const [from, to] of [['1.4C1', '1.114'], ['1.507', '1.1A']] as const) {
+      const path = spnRouteWalk(from, to)
+      for (const seed of [1, 2]) {
+        for (const kind of ['kalman', 'particle'] as const) {
+          const result = await runSimulation({ venue, path, sim: { seed, shadowingDb: 4 }, pdr: true, fusion: { stepFilterKind: kind, particleFilter: { seed } } })
+          const fixes = result.fused.filter((f) => f.floorId === 'spn1-l1')
+          stats[kind].error += result.report.meanM
+          for (let i = 1; i < fixes.length; i++) if (!walls.canWalk('spn1-l1', fixes[i - 1]!.enu, fixes[i]!.enu)) stats[kind].crossings++
+          if (kind === 'particle') stats.particle.inWall += fixes.filter((f) => !walls.isOpen('spn1-l1', f.enu.e, f.enu.n)).length
+        }
+      }
+    }
+    expect(stats.particle.crossings).toBeLessThan(stats.kalman.crossings / 3)
+    expect(stats.particle.inWall).toBe(0)
+    expect(stats.particle.error).toBeLessThan(stats.kalman.error * 1.1)
+  }, 60000)
 
   it('keeps the dot still while standing', async () => {
     const stand = [

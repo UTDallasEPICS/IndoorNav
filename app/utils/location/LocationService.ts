@@ -25,6 +25,7 @@ export type { LocationEvent, LocationFix, MapPosition, ProviderStatus, VenueConf
 export { spnVenue } from './venues/spn'
 export { withStoredBeacons, type StoredBeacon } from './beaconRegistry'
 export { withStoredFloors, type StoredFloor } from './floorRegistry'
+export { withFloorGrids } from './fusion/walkableMap'
 export type { BarometerReading } from './providers/barometer/BarometerProvider'
 export { requestMotionPermission } from './providers/pdr/capacitorMotionSource'
 
