@@ -5,6 +5,7 @@
 //   const unsubscribe = location.subscribePosition((position) => { ... }) // or subscribe() for raw ENU fixes
 //   await location.start(spnVenue)
 
+import { NO_DEBUG_LOG, type DebugLog } from './debug/debugLog'
 import { Emitter } from './emitter'
 import { FusionEngine, type FusionOptions } from './fusion/FusionEngine'
 import { toMapPosition } from './mapPosition'
@@ -28,6 +29,7 @@ export { withStoredFloors, type StoredFloor } from './floorRegistry'
 export { withFloorGrids } from './fusion/walkableMap'
 export type { BarometerReading } from './providers/barometer/BarometerProvider'
 export { requestMotionPermission } from './providers/pdr/capacitorMotionSource'
+export { NO_DEBUG_LOG, type DebugLog } from './debug/debugLog'
 
 export interface LocationServiceOptions {
   providers: LocationProvider[]
@@ -39,6 +41,8 @@ export interface LocationServiceOptions {
    */
   barometer?: BarometerProvider
   fusion?: Partial<FusionOptions>
+  /** Records sensor inputs and filter decisions (debug/debugLog.ts). Off unless given. */
+  debugLog?: DebugLog
 }
 
 export class LocationService {
@@ -46,6 +50,7 @@ export class LocationService {
   private motion: PdrProvider | null
   private barometer: BarometerProvider | null
   private fusionOptions: Partial<FusionOptions>
+  private debug: DebugLog
   private fusion: FusionEngine | null = null
   private fixes = new Emitter<LocationFix>()
   private positions = new Emitter<MapPosition>()
@@ -61,6 +66,7 @@ export class LocationService {
     this.motion = options.motion ?? null
     this.barometer = options.barometer ?? null
     this.fusionOptions = options.fusion ?? {}
+    this.debug = options.debugLog ?? NO_DEBUG_LOG
   }
 
   /** Latest fused fix, or null before the first one */
@@ -108,7 +114,15 @@ export class LocationService {
   /** Starts every provider. A provider that fails (e.g. permission denied) reports it via status; the rest keep running. */
   async start(venue: VenueConfig) {
     await this.stop()
-    const fusion = new FusionEngine(venue, this.fusionOptions)
+    const debug = this.debug
+    debug.log('start', {
+      venueId: venue.id,
+      beacons: venue.beacons.length,
+      providers: this.providers.map((p) => p.id),
+      motion: this.motion !== null,
+      barometer: this.barometer !== null
+    })
+    const fusion = new FusionEngine(venue, this.fusionOptions, debug)
     const index = indexVenue(venue)
     this.fusion = fusion
     this.cleanup.push(
@@ -121,13 +135,32 @@ export class LocationService {
           this.positions.emit(position)
         }
       }),
-      fusion.onEvent((event) => this.events.emit(event))
+      fusion.onEvent((event) => {
+        debug.log('event', event)
+        this.events.emit(event)
+      })
     )
     for (const provider of this.providers) {
       this.cleanup.push(
-        provider.onFix((fix) => fusion.ingest(fix)),
-        provider.onEvent((event) => this.events.emit(event)),
+        provider.onFix((fix) => {
+          debug.log('fix', {
+            timestamp: fix.timestamp,
+            source: fix.source,
+            e: fix.enu.e,
+            n: fix.enu.n,
+            floorId: fix.floorId,
+            accuracyM: fix.accuracyM,
+            covariance: fix.covariance ?? null,
+            isIndoor: fix.isIndoor
+          })
+          fusion.ingest(fix)
+        }),
+        provider.onEvent((event) => {
+          debug.log('event', event)
+          this.events.emit(event)
+        }),
         provider.onStatus((status) => {
+          debug.log('status', status)
           this.latestStatus[status.provider] = status
           this.statuses.emit(status)
         })
@@ -135,16 +168,25 @@ export class LocationService {
     }
     if (this.motion) {
       this.cleanup.push(
-        this.motion.onStep((step) => fusion.ingestStep(step)),
-        this.motion.onMotion((state) => fusion.ingestMotion(state)),
+        this.motion.onStep((step) => {
+          debug.log('step', step)
+          fusion.ingestStep(step)
+        }),
+        this.motion.onMotion((state) => {
+          debug.log('motion', state)
+          fusion.ingestMotion(state)
+        }),
         this.motion.onStatus((status) => {
+          debug.log('status', status)
           this.latestStatus[status.provider] = status
           this.statuses.emit(status)
         })
       )
     }
     if (this.barometer) {
+      if (debug.enabled) this.cleanup.push(this.barometer.onReading((reading) => debug.log('baro', { ...reading })))
       this.cleanup.push(this.barometer.onStatus((status) => {
+        debug.log('status', status)
         this.latestStatus[status.provider] = status
         this.statuses.emit(status)
       }))
@@ -155,6 +197,7 @@ export class LocationService {
   async stop() {
     if (!this.fusion) return
     await Promise.all(this.allProviders().map((provider) => provider.stop()))
+    this.debug.log('stop')
     for (const off of this.cleanup) off()
     this.cleanup = []
     this.fusion = null
@@ -177,12 +220,14 @@ export function createDeviceLocationService(options: {
   barometer?: Partial<BarometerFloorOptions> | false
   fusion?: Partial<FusionOptions>
   gps?: boolean
+  /** Records sensor inputs and filter decisions; see debug/debugLog.ts */
+  debugLog?: DebugLog
 } = {}) {
-  const ble = new BleProvider(new CapacitorBleScanner(), options.ble)
+  const ble = new BleProvider(new CapacitorBleScanner(), options.ble, options.debugLog)
   const providers: LocationProvider[] = [ble]
   if (options.gps ?? true) providers.push(new GpsProvider(new CapacitorGpsSource()))
   const motion = options.pdr === false ? undefined : new PdrProvider(new CapacitorMotionSource(), options.pdr)
   const barometer = options.barometer === false ? undefined : new BarometerProvider(new CapacitorPressureSource(), options.barometer)
   if (barometer) ble.setFloorSelector((vote, timestamp) => barometer.chooseFloor(vote, timestamp))
-  return new LocationService({ providers, motion, barometer, fusion: options.fusion })
+  return new LocationService({ providers, motion, barometer, fusion: options.fusion, debugLog: options.debugLog })
 }

@@ -94,6 +94,9 @@ pnpm cap:ios             # build, sync, open Xcode
 pnpm cap:android         # build, sync, open Android Studio
 pnpm cap:run:ios         # build and run on a simulator/device (also cap:run:android)
 
+# Location debug log: record sensor inputs + filter decisions to a file on the phone (app/utils/location/README.md)
+NUXT_PUBLIC_LOCATION_DEBUG_LOG=true pnpm cap:run:ios
+
 # Live reload on a phone: serve on LAN, then point the app at it
 pnpm dev --host
 CAP_SERVER_URL=http://<LAN-IP>:3000 pnpm exec cap run ios   # run plain cap:sync before any release build

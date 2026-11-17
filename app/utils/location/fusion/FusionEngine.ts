@@ -10,6 +10,7 @@
 //   - Where the floor has a route grid (Floor.walkGrid), the step filter is a ParticleFilter that keeps the dot
 //     out of walls; elsewhere it's StepKalman.
 
+import { NO_DEBUG_LOG, type DebugLog } from '../debug/debugLog'
 import { Emitter } from '../emitter'
 import { enuToWgs84 } from '../geo/wgs84'
 import { indexVenue, type VenueIndex } from '../venue'
@@ -65,17 +66,24 @@ export class FusionEngine {
   private isIndoor: boolean | null = null
   private buildingId: string | null = null
   private floorId: string | null = null
+  private stepFilterKind: 'particle' | 'kalman'
 
-  constructor(venue: VenueConfig, options: Partial<FusionOptions> = {}) {
+  constructor(venue: VenueConfig, options: Partial<FusionOptions> = {}, private debug: DebugLog = NO_DEBUG_LOG) {
     this.options = { ...DEFAULT_FUSION, ...options }
     this.index = indexVenue(venue)
     this.filter = new ConstantVelocityKalman(this.options.kalman)
     const walls = createWalkableMap(venue)
     const anyGrid = [...this.index.floors.keys()].some((id) => walls.hasFloor(id))
     const kind = this.options.stepFilterKind
-    this.stepFilter = kind === 'particle' || (kind === 'auto' && anyGrid)
-      ? new ParticleFilter(walls, this.options.particleFilter)
-      : new StepKalman(this.options.stepKalman)
+    this.stepFilterKind = kind === 'particle' || (kind === 'auto' && anyGrid) ? 'particle' : 'kalman'
+    this.stepFilter = this.stepFilterKind === 'particle'
+      ? new ParticleFilter(walls, this.options.particleFilter, debug)
+      : new StepKalman(this.options.stepKalman, debug)
+    debug.log('fusion.filter', {
+      stepFilter: this.stepFilterKind,
+      gridFloors: [...this.index.floors.keys()].filter((id) => walls.hasFloor(id)),
+      options: this.options
+    })
     this.detector = new IndoorOutdoorDetector(this.index.footprints, this.options.indoorOutdoor)
   }
 
@@ -111,12 +119,14 @@ export class FusionEngine {
     if (this.motionLive(fix.timestamp)) {
       const cv = this.filter.state()!
       if (!this.stepFilter.state()) {
+        this.debug.log('fusion.seed', { timestamp: fix.timestamp, e: cv.e, n: cv.n, accuracyM: cv.accuracyM })
         this.stepFilter.seed(cv.e, cv.n, cv.accuracyM, fix.timestamp)
       } else {
         this.stepFilter.setMoving(this.motion!.isMoving)
         this.stepFilter.update(fix.enu.e, fix.enu.n, fix.accuracyM, fix.timestamp, fix.covariance)
       }
     } else {
+      if (this.stepFilter.state()) this.debug.log('fusion.motionTimeout', { timestamp: fix.timestamp, lastMotion: this.motion?.timestamp ?? null })
       this.stepFilter.reset()
     }
     this.emitFix(fix.timestamp, fix.headingDeg)
@@ -150,6 +160,7 @@ export class FusionEngine {
   private deadReckoning(timestamp: number) {
     if (!this.stepFilter.state()) return false
     if (this.lastAbsoluteFixTime !== null && timestamp - this.lastAbsoluteFixTime <= this.options.maxDeadReckoningMs) return true
+    this.debug.log('fusion.deadReckoningExpired', { timestamp, lastAbsoluteFix: this.lastAbsoluteFixTime })
     this.stepFilter.reset()
     return false
   }
@@ -157,7 +168,8 @@ export class FusionEngine {
   private emitFix(timestamp: number, providerHeadingDeg?: number) {
     if (this.isIndoor === null) return
     const live = this.motionLive(timestamp)
-    const filtered = (live && this.stepFilter.state()) || this.filter.state()
+    const stepState = live ? this.stepFilter.state() : null
+    const filtered = stepState || this.filter.state()
     if (!filtered) return
     const speed = Math.hypot(filtered.ve, filtered.vn)
     const headingDeg = live && this.motion!.headingDeg !== null
@@ -169,6 +181,15 @@ export class FusionEngine {
     // Indoors the height is the floor's; outdoors height isn't tracked, so use the campus origin (u = 0)
     const u = this.floorId ? this.index.floors.get(this.floorId)?.floor.transform.floorZ ?? 0 : 0
     const enu = { e: filtered.e, n: filtered.n, u }
+    this.debug.log('out', {
+      timestamp,
+      filter: stepState ? this.stepFilterKind : 'cv',
+      e: filtered.e,
+      n: filtered.n,
+      floorId: this.floorId,
+      accuracyM: filtered.accuracyM,
+      headingDeg: headingDeg ?? null
+    })
     this.fixes.emit({
       enu,
       wgs84: enuToWgs84(enu, this.index.venue.origin),

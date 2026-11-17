@@ -1,6 +1,7 @@
 // BLE location provider: beacon adverts -> per-AP RSSI -> floor vote -> position fix.
 // The floor comes from the vote, unless a floor selector (the barometer) picks it; see setFloorSelector.
 
+import { NO_DEBUG_LOG, type DebugLog } from '../../debug/debugLog'
 import { Emitter } from '../../emitter'
 import { enuToWgs84 } from '../../geo/wgs84'
 import { indexVenue, type VenueIndex } from '../../venue'
@@ -76,7 +77,7 @@ export class BleProvider implements LocationProvider {
   private firstAdvertTime: number | null = null
   private floorSelector: FloorSelector | null = null
 
-  constructor(private scanner: BleScanner, options: Partial<BleProviderOptions> = {}) {
+  constructor(private scanner: BleScanner, options: Partial<BleProviderOptions> = {}, private debug: DebugLog = NO_DEBUG_LOG) {
     this.options = { ...DEFAULT_BLE_OPTIONS, ...options, deviceOffset: { ...DEFAULT_BLE_OPTIONS.deviceOffset, ...options.deviceOffset } }
     this.bank = new ApRssiBank(this.options.rssi)
   }
@@ -137,6 +138,17 @@ export class BleProvider implements LocationProvider {
     const vote = voteFloorWithShare(readings.map((r) => ({ floorId: r.beacon.floorId, rssi: r.rssi })), this.options.floorVoteTopN)
     const floorId = this.floorSelector?.(vote, now) ?? vote?.floorId ?? null
     const floorInfo = floorId ? index.floors.get(floorId) : undefined
+    if (this.debug.enabled) {
+      // What this fix is computed from: one RSSI per AP (strongest beam, as the survey measured), before the
+      // device offset is removed
+      this.debug.log('ble.readings', {
+        timestamp: now,
+        vote,
+        floorId,
+        deviceOffsetDb: this.deviceOffsetDb,
+        readings: readings.map((r) => [r.beaconId, r.rssi, r.beacon.floorId])
+      })
+    }
     if (!floorId || !floorInfo) return null
 
     // Only beacons on the chosen floor are used for the 2D position
@@ -161,7 +173,10 @@ export class BleProvider implements LocationProvider {
       })
 
     const estimate = estimators[this.options.estimator](observations)
-    if (!estimate) return null
+    if (!estimate) {
+      this.debug.log('ble.noFix', { timestamp: now, floorId, beacons: observations.length })
+      return null
+    }
     this.trackDeviceOffset(estimate, now)
 
     // Fixes a second apart share most of the RSSI window, so they aren't independent looks at the position.

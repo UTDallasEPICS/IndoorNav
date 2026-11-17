@@ -266,6 +266,38 @@ wall losses, and Gaussian noise), so it's **optimistic**. Real walls, bodies and
 Use it to catch regressions and compare settings, not to predict real accuracy. That needs walking tests
 in SPN1 (see the CSV/checkpoint success criterion in CLAUDE.md).
 
+## Debug log (recording a walk on a phone)
+
+To see why the dot misbehaves on a real walk, build with the debug log on. The app then records every sensor input
+and filter decision to a JSON-lines file **on the phone** (it's never uploaded; C02):
+
+```bash
+NUXT_PUBLIC_LOCATION_DEBUG_LOG=true pnpm cap:run:ios      # or cap:run:android / cap:ios
+```
+
+The flag is baked in when the web bundle is built (`runtimeConfig.public.locationDebugLog` in `nuxt.config.ts`),
+so run plain `pnpm cap:sync` again before any build you hand to other people. While it records, the map shows
+"Logging location" and the file name at the top left. A new file starts each time location starts.
+
+What's in it (one JSON object per line, `{ at, kind, ... }`; full list in `debug/debugLog.ts`):
+
+- **Inputs, as the filters got them:** `fix` (BLE position, accuracy, error ellipse), `step` (length, heading,
+  heading accuracy), `motion` (moving, heading), `baro`, plus `ble.readings` (per-AP RSSI and floor vote each BLE
+  fix came from). Enough to replay a walk into the filters on a desktop.
+- **Decisions:** `fusion.*` (seeding, dropping the step filter), `pf.step` (heading stretch, cloud spread, wall
+  crossings, resampling), `pf.update` / `kf.update` (gate distance, gated or not), `pf.relocalize`, `pf.snap`
+  (dot moved off a wall).
+- **Output:** `out`, the position the map was given and which filter made it (`particle`, `kalman`, or `cv`).
+
+Getting the file off the phone (`location-logs/location-<time>.jsonl`):
+
+- **iOS:** Xcode → Window → Devices and Simulators → the app → ⋯ → Download Container, then
+  `AppData/Documents/location-logs/`. Or:
+  `xcrun devicectl device copy from --device <id> --domain-type appDataContainer --domain-identifier edu.utdallas.epics.indoornav --source Documents/location-logs --destination ./location-logs`
+- **Android:** `adb pull /sdcard/Android/data/edu.utdallas.epics.indoornav/files/location-logs`
+
+Logs hold your walk's positions: don't commit them or share them outside the team.
+
 ## Known limits / things to verify
 
 - **iOS BLE:** scanning only works in the foreground with the Eddystone service UUID filter. iOS hides

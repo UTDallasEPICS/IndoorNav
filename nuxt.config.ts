@@ -7,6 +7,14 @@ export default defineNuxtConfig({
   ssr: false,
   // Theme colours, fonts and base styles (edit colours there)
   css: ['~/assets/css/main.css'],
+  runtimeConfig: {
+    public: {
+      // Location debug log: records sensor inputs and filter decisions to a file on the phone (see
+      // app/utils/location/README.md). Off by default; turn it on for a build with
+      // NUXT_PUBLIC_LOCATION_DEBUG_LOG=true pnpm cap:run:ios
+      locationDebugLog: false
+    }
+  },
   app: {
     // Fade between pages; the animation itself is in main.css (.page-*)
     pageTransition: { name: 'page', mode: 'out-in' },

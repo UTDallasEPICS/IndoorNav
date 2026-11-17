@@ -7,6 +7,7 @@ import { readonly, ref } from 'vue'
 import { listBeacons } from '~/db/beacons'
 import { listFloors } from '~/db/floors'
 import { GRID_BOUNDS } from '#shared/grid-map'
+import { createFileDebugLog, type FileDebugLog } from '~/utils/location/debug/capacitorFileLog'
 import { createDeviceLocationService, requestMotionPermission, spnVenue, withFloorGrids, withStoredBeacons, withStoredFloors, type BarometerReading, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
 import { loadRouteGrid, routeBetween } from '~/utils/route-between'
 
@@ -32,6 +33,9 @@ const locationLost = ref(false)
 const barometerStatus = ref<ProviderStatus['state']>('idle')
 const barometerMessage = ref('')
 const barometerReading = ref<BarometerReading | null>(null)
+// Location debug log (NUXT_PUBLIC_LOCATION_DEBUG_LOG): the file this run writes to, or null when off
+const debugLogFile = ref<string | null>(null)
+let debugLog: FileDebugLog | null = null
 let lastHeardAt = 0 // when we last had a position, or when scanning started
 let service: LocationService | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
@@ -51,8 +55,14 @@ export function useNavigation() {
     // so ask now, before the awaits below; the PDR provider reads the answer when it starts.
     void requestMotionPermission()
 
+    // Debug builds can record every sensor input and filter decision to a file on the phone (stays on it, C02)
+    if (isDebugLogOn()) {
+      debugLog = createFileDebugLog()
+      debugLogFile.value = debugLog.path
+    }
+
     // GPS is off: it was removed from the map page and doesn't help inside SPN1
-    const created = createDeviceLocationService({ gps: false })
+    const created = createDeviceLocationService({ gps: false, ...(debugLog && { debugLog: debugLog.log }) })
     service = created
     created.onStatus(status => {
       if (status.provider === 'barometer') {
@@ -120,6 +130,12 @@ export function useNavigation() {
     barometerMessage.value = ''
     barometerReading.value = null
     await stopping.stop()
+    if (debugLog) {
+      const closing = debugLog
+      debugLog = null
+      debugLogFile.value = null
+      await closing.log.close()
+    }
   }
 
   function canRoute(start: MapPoint, destination: MapPoint) {
@@ -140,9 +156,16 @@ export function useNavigation() {
     barometerStatus: readonly(barometerStatus),
     barometerMessage: readonly(barometerMessage),
     barometerReading: readonly(barometerReading), // pressure, height, barometer floor vs BLE vote; null before the first sample
+    debugLogFile: readonly(debugLogFile), // file the location debug log is writing to, or null when it's off
     startLocation,
     stopLocation,
     canRoute,
     routeTo
   }
+}
+
+/** Whether this build records the location debug log (nuxt.config.ts: runtimeConfig.public.locationDebugLog) */
+function isDebugLogOn() {
+  const value: unknown = useRuntimeConfig().public.locationDebugLog
+  return value === true || value === 'true' || value === '1'
 }
