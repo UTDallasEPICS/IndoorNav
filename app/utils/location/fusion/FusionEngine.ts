@@ -95,7 +95,7 @@ export class FusionEngine {
         this.stepFilter.seed(cv.e, cv.n, cv.accuracyM, fix.timestamp)
       } else {
         this.stepFilter.setMoving(this.motion!.isMoving)
-        this.stepFilter.update(fix.enu.e, fix.enu.n, fix.accuracyM, fix.timestamp)
+        this.stepFilter.update(fix.enu.e, fix.enu.n, fix.accuracyM, fix.timestamp, fix.covariance)
       }
     } else {
       this.stepFilter.reset()

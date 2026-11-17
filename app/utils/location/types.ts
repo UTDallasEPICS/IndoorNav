@@ -38,6 +38,8 @@ export interface LocationFix {
   buildingId: string | null
   /** Roughly a 1-sigma horizontal error radius, in meters */
   accuracyM: number
+  /** East/north error covariance (m^2), when the error isn't round (e.g. beacons in a line down a hallway) */
+  covariance?: { ee: number, en: number, nn: number }
   /** Compass bearing in degrees clockwise from true north, if known */
   headingDeg?: number
   /** Milliseconds since the Unix epoch */
@@ -144,6 +146,10 @@ export interface BeaconRegistryEntry {
   txPower: number
   /** Log-distance path loss exponent: ~2 in open space, 2.5-4 with walls and people */
   pathLossExponent: number
+  /** How far the survey's readings scattered around that fit, 1 sigma (dB) */
+  rssiSigmaDb?: number
+  /** How well the survey pinned the beacon's position, 1 sigma along its worst direction (m) */
+  positionSigmaM?: number
 }
 
 export interface VenueConfig {

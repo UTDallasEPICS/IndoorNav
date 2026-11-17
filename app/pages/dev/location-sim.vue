@@ -9,6 +9,7 @@
       <label>
         Estimator
         <select v-model="estimator">
+          <option value="rssiFit">RSSI fit</option>
           <option value="leastSquares">Least squares</option>
           <option value="weightedCentroid">Weighted centroid</option>
         </select>
@@ -70,7 +71,7 @@ import { sampleWalk } from '~/utils/location/fixtures/sampleWalk'
 import { DEFAULT_SIM, runSimulation } from '~/utils/location/sim/simulator'
 import { indexVenue } from '~/utils/location/venue'
 
-const estimator = ref('leastSquares')
+const estimator = ref('rssiFit')
 const rssiNoiseDb = ref(DEFAULT_SIM.rssiNoiseDb)
 const pdr = ref(true)
 const seed = ref(1)
