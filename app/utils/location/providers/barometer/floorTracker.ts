@@ -6,6 +6,11 @@
 // anchor), and keeps cancelling slow drift while the two agree. Between anchors, the barometer alone decides the
 // floor, so beacons bleeding through from the floor above or below (e.g. on SPN1's stairs) can't flip it.
 //
+// The anchor itself is only BLE's guess, and the first confident vote can be wrong: in a room off SPN1's open
+// atrium the phone hears the floor above through the opening. So while the floor is still just the anchor (the
+// barometer hasn't seen a floor change since), a steady BLE majority for another floor over reanchorAfterMs is
+// enough to move it, even when no single vote is confident. A floor the barometer climbed to needs confident votes.
+//
 // Pure: no timers or platform calls, so it runs in tests. BarometerProvider feeds it pressure samples, and the
 // BLE provider asks it for the floor (passing its vote) before every fix.
 
@@ -29,8 +34,13 @@ export interface BarometerFloorOptions {
   speedWindowMs: number
   /** While BLE agrees, how fast the height is pulled back onto the floor, cancelling weather drift (ms) */
   driftTimeConstantMs: number
-  /** Re-anchor to BLE once it has confidently disagreed this long (ms): the anchor was wrong, or drift too large */
+  /**
+   * Window (ms) of steady BLE votes for re-anchoring: the anchor was wrong, or drift too large. Re-anchors when
+   * another floor's average share over the whole window reaches minVoteShare (or anchorOverrideShare, below).
+   */
   reanchorAfterMs: number
+  /** Average share that's enough to move a floor that is still only BLE's anchor (no barometer floor change since) */
+  anchorOverrideShare: number
   /** Ignore the barometer once it has been silent this long (ms); BLE's vote picks the floor meanwhile */
   staleAfterMs: number
 }
@@ -45,6 +55,7 @@ export const DEFAULT_BAROMETER_FLOOR: BarometerFloorOptions = {
   speedWindowMs: 3000,
   driftTimeConstantMs: 30_000,
   reanchorAfterMs: 20_000,
+  anchorOverrideShare: 0.5,
   staleAfterMs: 5000
 }
 
@@ -85,7 +96,11 @@ export class BarometerFloorTracker {
   private vote: FloorVote | null = null
   /** The floor BLE has confidently voted for without a break, and since when */
   private run: { floorId: string, since: number } | null = null
-  private disagreeSince: number | null = null
+  /** True once the barometer has moved the floor since the last anchor: then only confident votes can override it */
+  private floorFromBarometer = false
+  /** Steady BLE votes since the last anchor or floor change, trimmed to reanchorAfterMs; and when collecting began */
+  private evidence: Array<{ timestamp: number, vote: FloorVote }> = []
+  private evidenceSince: number | null = null
   private lastCorrectionTime: number | null = null
 
   constructor(options: Partial<BarometerFloorOptions> = {}) {
@@ -147,17 +162,13 @@ export class BarometerFloorTracker {
       return null
     }
 
-    if (confident && steady && this.candidate === null) {
-      if (vote.floorId === this.floorId) {
-        this.disagreeSince = null
-        this.correctDrift(timestamp)
-      } else {
-        this.disagreeSince ??= timestamp
-        this.lastCorrectionTime = null
-        if (settled && timestamp - this.disagreeSince >= this.options.reanchorAfterMs) this.anchor(vote.floorId, timestamp)
-      }
+    if (vote !== null && steady && this.candidate === null) {
+      if (confident && vote.floorId === this.floorId) this.correctDrift(timestamp)
+      else this.lastCorrectionTime = null
+      const target = this.reanchorTarget(vote, timestamp)
+      if (target) this.anchor(target, timestamp)
     } else {
-      this.disagreeSince = null
+      this.clearEvidence()
       this.lastCorrectionTime = null
     }
     return this.floorId
@@ -192,9 +203,48 @@ export class BarometerFloorTracker {
     }
     if (timestamp - this.candidate.since >= this.options.dwellMs) {
       this.floorId = nearest.id
+      this.floorFromBarometer = true
       this.candidate = null
-      this.disagreeSince = null
+      this.clearEvidence()
     }
+  }
+
+  /**
+   * Adds a steady vote to the evidence; returns the floor to re-anchor to, if any. Each vote gives its share to
+   * the winner and, when the winner isn't the current floor, the rest to the current floor (an upper bound, so
+   * mixed votes favour staying put). Moves only after a full window, to a floor whose average beats the current one.
+   */
+  private reanchorTarget(vote: FloorVote, timestamp: number): string | null {
+    this.evidenceSince ??= timestamp
+    this.evidence.push({ timestamp, vote })
+    const cutoff = timestamp - this.options.reanchorAfterMs
+    while (this.evidence[0]!.timestamp < cutoff) this.evidence.shift()
+    if (timestamp - this.evidenceSince < this.options.reanchorAfterMs) return null
+
+    const current = this.floorId!
+    const support = new Map<string, number>()
+    const add = (floorId: string, share: number) => support.set(floorId, (support.get(floorId) ?? 0) + share)
+    for (const { vote } of this.evidence) {
+      add(vote.floorId, vote.share)
+      if (vote.floorId !== current) add(current, 1 - vote.share)
+    }
+    const needed = this.floorFromBarometer ? this.options.minVoteShare : this.options.anchorOverrideShare
+    const n = this.evidence.length
+    const currentShare = (support.get(current) ?? 0) / n
+    let best: string | null = null
+    let bestShare = 0
+    for (const [floorId, total] of support) {
+      if (floorId !== current && total / n > bestShare) {
+        best = floorId
+        bestShare = total / n
+      }
+    }
+    return best !== null && bestShare >= needed && bestShare > currentShare ? best : null
+  }
+
+  private clearEvidence() {
+    this.evidence = []
+    this.evidenceSince = null
   }
 
   /** Sets the height so the user stands on `floorId` now */
@@ -205,8 +255,9 @@ export class BarometerFloorTracker {
     this.buildingFloors = info.building.floors.map((floor) => ({ id: floor.id, elevationM: floor.transform.floorZ }))
     this.offset = info.floor.transform.floorZ - this.altitude
     this.floorId = floorId
+    this.floorFromBarometer = false
     this.candidate = null
-    this.disagreeSince = null
+    this.clearEvidence()
     this.lastCorrectionTime = timestamp
   }
 
@@ -215,8 +266,9 @@ export class BarometerFloorTracker {
     this.buildingId = null
     this.buildingFloors = []
     this.floorId = null
+    this.floorFromBarometer = false
     this.candidate = null
-    this.disagreeSince = null
+    this.clearEvidence()
     this.lastCorrectionTime = null
   }
 
