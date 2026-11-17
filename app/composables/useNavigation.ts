@@ -18,6 +18,13 @@ type MapPoint = { x: number, y: number, floor: number } // fractions (0–1) of 
 /** Floors with a route grid (public/data/SPN.txt and SPN-level2.txt) */
 const ROUTABLE_FLOORS = [1, 2]
 
+/**
+ * Floors whose route grid also keeps the location dot out of walls (particle filter). Not level 2 yet: its grid
+ * includes furniture, and on a recorded level 2 walk (2026-11-17) the walls made the dot jump twice as often as
+ * without them (58 vs 27 jumps over 1 m). Add 2 once it has a walls-only grid.
+ */
+const WALL_CONSTRAINED_FLOORS = [1]
+
 /** A position older than this is dropped, so the dot doesn't sit still after we stop hearing beacons */
 const STALE_AFTER_MS = 10_000
 
@@ -94,8 +101,9 @@ export function useNavigation() {
     try {
       const db = await useDb()
       venue = withStoredBeacons(withStoredFloors(spnVenue, await listFloors(db)), await listBeacons(db))
-      // The route grids also keep the dot out of walls. A floor whose grid fails to load just isn't constrained.
-      const grids = await Promise.all(ROUTABLE_FLOORS.map(floor => loadRouteGrid(floor)
+      // The route grids of WALL_CONSTRAINED_FLOORS also keep the dot out of walls. A floor whose grid fails to load
+      // just isn't constrained.
+      const grids = await Promise.all(WALL_CONSTRAINED_FLOORS.map(floor => loadRouteGrid(floor)
         .then(grid => [floor, { grid, bounds: GRID_BOUNDS[floor as keyof typeof GRID_BOUNDS] }] as const)
         .catch(() => null)))
       venue = withFloorGrids(venue, Object.fromEntries(grids.filter(g => g !== null)))

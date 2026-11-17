@@ -128,8 +128,9 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
 - Per beacon: `txPower` (RSSI at 1 m) and `pathLossExponent` come from the survey fit (see **Beacon data**).
   Re-survey to recalibrate; beacons without a fit use `DEFAULT_BEACON_REGISTRY_OPTIONS`.
 - `FusionEngine` options: Kalman `accelerationNoise`, indoor/outdoor `switchAfterMs`, `gpsGoodAccuracyM`,
-  `maxDeadReckoningMs` (5 s: how long steps/compass alone keep moving the dot after the last BLE fix; after that
-  nothing is emitted, so the map's 10 s stale check can clear the dot).
+  `maxDeadReckoningMs` (15 s: how long positions from steps/compass alone are shown after the last BLE fix; after
+  that nothing is emitted, so the map's 10 s stale check can clear the dot, but the filter keeps following steps so
+  the next fix doesn't make the dot jump) and `restartAfterGapMs` (30 s: after a longer gap, restart from BLE).
 - `StepKalman` (`fusion/stepKalman.ts`): `stationaryMeasurementScale` and `stationaryNoise` (how hard the dot holds
   still while you stand), `movingNoise`, `gateChi2` / `relocalizeAfter` (outlier rejection).
 - `PdrProvider` options: step `thresholdMs2` / `weinbergK`, `headingSmoothingMs`, `defaultHeadingAccuracyDeg`.
@@ -201,6 +202,9 @@ instead of `StepKalman`. Same inputs, same error model; it just also knows the w
   are nudged apart by 0.3 m (`resampleJitterM`), or walls shrink the cloud until it ignores BLE.
 - `FusionOptions.stepFilterKind` forces `'kalman'` or `'particle'`. Floors without a grid (and outdoors) use
   StepKalman.
+- **Only level 1 for now** (`WALL_CONSTRAINED_FLOORS` in `useNavigation.ts`). Level 2's grid includes furniture: a
+  recorded level 2 walk (2026-11-17, replayed from its debug log) jumped over 1 m 58 times with it versus 27 without,
+  and the mean landed in a wall 187 times. Add level 2 back once it has a walls-only grid.
 
 Simulator, 4 A* routes on SPN1 level 1 with the surveyed APs (`sim/spnWalk.ts`), 8 seeds, after the first 15 s:
 

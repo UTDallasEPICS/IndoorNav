@@ -275,13 +275,30 @@ describe('FusionEngine dead reckoning without BLE', () => {
   it('stops emitting compass-only positions once BLE goes quiet, so the dot can go stale', () => {
     const { engine, fixes } = setup()
     for (let t = 250; t <= 60_000; t += 250) engine.ingestMotion({ timestamp: t, isMoving: false, headingDeg: 90, headingAccuracyDeg: 10 })
-    expect(fixes.at(-1)!.timestamp).toBeLessThanOrEqual(5000)
+    expect(fixes.at(-1)!.timestamp).toBeLessThanOrEqual(15_000)
   })
 
-  it('stops moving the dot on steps alone once BLE goes quiet', () => {
+  it('stops showing positions from steps alone once BLE goes quiet', () => {
     const { engine, fixes } = setup()
     for (let t = 500; t <= 30_000; t += 500) engine.ingestStep({ timestamp: t, lengthM: 0.7, headingDeg: 90, headingAccuracyDeg: 10 })
-    expect(fixes.at(-1)!.timestamp).toBeLessThanOrEqual(5000)
+    expect(fixes.at(-1)!.timestamp).toBeLessThanOrEqual(15_000)
+  })
+
+  it('keeps following steps through a BLE gap, so the next fix carries on from there instead of jumping', () => {
+    const { engine, fixes } = setup()
+    // 20 s walking east at 1.4 m/s with no BLE (past maxDeadReckoningMs), then BLE agrees with the steps
+    for (let t = 500; t <= 20_000; t += 500) engine.ingestStep({ timestamp: t, lengthM: 0.7, headingDeg: 90, headingAccuracyDeg: 10 })
+    engine.ingest(bleFix(158, 65, 20_100))
+    const after = fixes.at(-1)!
+    expect(after.timestamp).toBe(20_100)
+    expect(after.enu.e).toBeGreaterThan(150) // with the steps, not back near the last fix (130) or the CV filter
+  })
+
+  it('restarts from BLE after a gap too long to trust the steps', () => {
+    const { engine, fixes } = setup()
+    for (let t = 500; t <= 40_000; t += 500) engine.ingestStep({ timestamp: t, lengthM: 0.7, headingDeg: 0, headingAccuracyDeg: 10 })
+    engine.ingest(bleFix(140, 60, 40_100))
+    expect(Math.hypot(fixes.at(-1)!.enu.e - 140, fixes.at(-1)!.enu.n - 60)).toBeLessThan(3)
   })
 
   it('grows the reported accuracy while only motion data arrives', () => {

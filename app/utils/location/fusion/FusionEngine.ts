@@ -37,8 +37,13 @@ export interface FusionOptions {
   minSpeedForHeading: number
   /** Fall back to the constant-velocity filter once motion sensors have been silent this long (ms) */
   motionTimeoutMs: number
-  /** Stop moving the dot on steps alone once no absolute fix has been used for this long (ms), so it can go stale */
+  /**
+   * Stop showing positions from steps alone once no absolute fix has been used for this long (ms), so the dot can go
+   * stale. Steps still move the filter in the meantime, so the next fix carries on from where they led.
+   */
   maxDeadReckoningMs: number
+  /** After a BLE/GPS gap this long (ms), restart the step filter at the next fix instead of trusting the steps */
+  restartAfterGapMs: number
 }
 
 export const DEFAULT_FUSION: FusionOptions = {
@@ -49,7 +54,10 @@ export const DEFAULT_FUSION: FusionOptions = {
   indoorOutdoor: DEFAULT_INDOOR_OUTDOOR,
   minSpeedForHeading: 0.5,
   motionTimeoutMs: 2000,
-  maxDeadReckoningMs: 5000
+  // SPN1 level 2 BLE fixes come ~2 s apart with gaps up to ~11 s (walk of 2026-11-17); 5 s dropped the step filter
+  // in those gaps and the next fix restarted it from the BLE-only estimate, a jump of up to 25 m
+  maxDeadReckoningMs: 15000,
+  restartAfterGapMs: 30000
 }
 
 export class FusionEngine {
@@ -60,6 +68,8 @@ export class FusionEngine {
   private motion: MotionState | null = null
   /** Time of the last BLE/GPS fix the filters used */
   private lastAbsoluteFixTime: number | null = null
+  /** Whether the current BLE/GPS gap has outlasted maxDeadReckoningMs (logged once per gap) */
+  private deadReckoningExpired = false
   private detector: IndoorOutdoorDetector
   private fixes = new Emitter<LocationFix>()
   private events = new Emitter<LocationEvent>()
@@ -115,7 +125,14 @@ export class FusionEngine {
     if (!useFix) return
 
     this.filter.update(fix.enu.e, fix.enu.n, fix.accuracyM, fix.timestamp)
+    const gapMs = this.lastAbsoluteFixTime === null ? null : fix.timestamp - this.lastAbsoluteFixTime
+    if (gapMs !== null && gapMs > this.options.restartAfterGapMs && this.stepFilter.state()) {
+      // Steps alone for this long have drifted too far to gate fixes against: start again from BLE
+      this.debug.log('fusion.gapRestart', { timestamp: fix.timestamp, gapMs })
+      this.stepFilter.reset()
+    }
     this.lastAbsoluteFixTime = fix.timestamp
+    this.deadReckoningExpired = false
     if (this.motionLive(fix.timestamp)) {
       const cv = this.filter.state()!
       if (!this.stepFilter.state()) {
@@ -135,18 +152,18 @@ export class FusionEngine {
   /** One PDR step: moves the estimate along the step's heading. Ignored until an absolute fix has placed us. */
   ingestStep(step: PdrStep) {
     this.motion = { timestamp: step.timestamp, isMoving: true, headingDeg: step.headingDeg ?? this.motion?.headingDeg ?? null, headingAccuracyDeg: step.headingAccuracyDeg }
-    if (!this.deadReckoning(step.timestamp)) return
+    if (!this.stepFilter.state()) return
     this.stepFilter.step(step.lengthM, step.headingDeg, step.headingAccuracyDeg, step.timestamp)
-    this.emitFix(step.timestamp)
+    if (this.deadReckoning(step.timestamp)) this.emitFix(step.timestamp)
   }
 
   /** The motion sensors' state. Re-emits the position so the heading arrow follows the compass between fixes. */
   ingestMotion(state: MotionState) {
     this.motion = state
     this.stepFilter.setMoving(state.isMoving)
-    if (!this.deadReckoning(state.timestamp)) return
+    if (!this.stepFilter.state()) return
     this.stepFilter.predict(state.timestamp) // the reported accuracy grows while only motion data arrives
-    this.emitFix(state.timestamp)
+    if (this.deadReckoning(state.timestamp)) this.emitFix(state.timestamp)
   }
 
   private motionLive(timestamp: number) {
@@ -154,14 +171,16 @@ export class FusionEngine {
   }
 
   /**
-   * Whether steps and compass may still move the dot: the step filter has been placed and an absolute fix was
-   * used recently. Otherwise drop the step filter, so nothing is emitted until BLE places us again.
+   * Whether positions from steps and compass may still be shown: an absolute fix was used recently. Otherwise
+   * nothing is emitted (the map's stale check clears the dot), but the step filter keeps following the steps, so the
+   * next BLE fix is checked against where they led instead of restarting the dot from BLE alone.
    */
   private deadReckoning(timestamp: number) {
-    if (!this.stepFilter.state()) return false
     if (this.lastAbsoluteFixTime !== null && timestamp - this.lastAbsoluteFixTime <= this.options.maxDeadReckoningMs) return true
-    this.debug.log('fusion.deadReckoningExpired', { timestamp, lastAbsoluteFix: this.lastAbsoluteFixTime })
-    this.stepFilter.reset()
+    if (!this.deadReckoningExpired) {
+      this.deadReckoningExpired = true
+      this.debug.log('fusion.deadReckoningExpired', { timestamp, lastAbsoluteFix: this.lastAbsoluteFixTime })
+    }
     return false
   }
 
@@ -208,6 +227,7 @@ export class FusionEngine {
     this.stepFilter.reset()
     this.motion = null
     this.lastAbsoluteFixTime = null
+    this.deadReckoningExpired = false
     this.detector.reset()
     this.isIndoor = null
     this.buildingId = null
