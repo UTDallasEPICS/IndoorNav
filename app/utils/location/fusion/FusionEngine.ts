@@ -7,6 +7,8 @@
 //   - While the motion sensors run (PDR), steps move the estimate and BLE/GPS only correct it (StepKalman):
 //     standing still, the dot stays put and BLE noise averages out. Without them, a constant-velocity Kalman
 //     filter smooths the fixes on its own.
+//   - Where the floor has a route grid (Floor.walkGrid), the step filter is a ParticleFilter that keeps the dot
+//     out of walls; elsewhere it's StepKalman.
 
 import { Emitter } from '../emitter'
 import { enuToWgs84 } from '../geo/wgs84'
@@ -14,12 +16,18 @@ import { indexVenue, type VenueIndex } from '../venue'
 import type { LocationEvent, LocationFix, MotionState, PdrStep, VenueConfig } from '../types'
 import { DEFAULT_INDOOR_OUTDOOR, IndoorOutdoorDetector, type IndoorOutdoorOptions } from './indoorOutdoor'
 import { ConstantVelocityKalman, DEFAULT_KALMAN, type KalmanOptions } from './kalman'
-import { DEFAULT_STEP_KALMAN, StepKalman, type StepKalmanOptions } from './stepKalman'
+import { DEFAULT_PARTICLE_FILTER, ParticleFilter, type ParticleFilterOptions } from './particleFilter'
+import { DEFAULT_STEP_KALMAN, StepKalman, type StepFilter, type StepKalmanOptions } from './stepKalman'
+import { createWalkableMap } from './walkableMap'
 
 export interface FusionOptions {
   kalman: KalmanOptions
   /** The filter used while motion sensors run */
   stepKalman: StepKalmanOptions
+  /** The filter used while motion sensors run on a floor with a route grid */
+  particleFilter: ParticleFilterOptions
+  /** Use the floors' route grids to keep the dot out of walls (needs Floor.walkGrid) */
+  useWalls: boolean
   indoorOutdoor: IndoorOutdoorOptions
   /** Below this speed (m/s) the heading is taken from the provider instead of the velocity */
   minSpeedForHeading: number
@@ -32,6 +40,8 @@ export interface FusionOptions {
 export const DEFAULT_FUSION: FusionOptions = {
   kalman: DEFAULT_KALMAN,
   stepKalman: DEFAULT_STEP_KALMAN,
+  particleFilter: DEFAULT_PARTICLE_FILTER,
+  useWalls: true,
   indoorOutdoor: DEFAULT_INDOOR_OUTDOOR,
   minSpeedForHeading: 0.5,
   motionTimeoutMs: 2000,
@@ -42,7 +52,7 @@ export class FusionEngine {
   private options: FusionOptions
   private index: VenueIndex
   private filter: ConstantVelocityKalman
-  private stepFilter: StepKalman
+  private stepFilter: StepFilter
   private motion: MotionState | null = null
   /** Time of the last BLE/GPS fix the filters used */
   private lastAbsoluteFixTime: number | null = null
@@ -57,7 +67,11 @@ export class FusionEngine {
     this.options = { ...DEFAULT_FUSION, ...options }
     this.index = indexVenue(venue)
     this.filter = new ConstantVelocityKalman(this.options.kalman)
-    this.stepFilter = new StepKalman(this.options.stepKalman)
+    const walls = createWalkableMap(venue)
+    const anyGrid = [...this.index.floors.keys()].some((id) => walls.hasFloor(id))
+    this.stepFilter = this.options.useWalls && anyGrid
+      ? new ParticleFilter(walls, this.options.particleFilter)
+      : new StepKalman(this.options.stepKalman)
     this.detector = new IndoorOutdoorDetector(this.index.footprints, this.options.indoorOutdoor)
   }
 
@@ -81,6 +95,7 @@ export class FusionEngine {
     const state = this.detector.update(fix.enu, fix.timestamp)
     const floorId = state.isIndoor ? (fix.floorId ?? this.floorId) : null
     this.updateState(state.isIndoor, state.buildingId, floorId, fix.timestamp)
+    this.stepFilter.setFloor?.(this.floorId)
 
     const useFix = fix.source === 'gps'
       ? !state.isIndoor || !this.detector.bleVisible(fix.timestamp)

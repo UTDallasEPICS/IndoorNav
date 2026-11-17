@@ -8,7 +8,25 @@
 // - A BLE fix far outside the filter's uncertainty (multipath, a body in the way) is dropped. If several in a row
 //   are dropped, the filter assumes it's the one that's lost and restarts at their average.
 
-import type { PositionFilter } from './kalman'
+/** East/north covariance (m^2) */
+export interface StepFilterCovariance {
+  ee: number
+  en: number
+  nn: number
+}
+
+/** A position filter driven by steps and corrected by absolute fixes: StepKalman, or ParticleFilter with walls. */
+export interface StepFilter {
+  seed(e: number, n: number, accuracyM: number, timestamp: number): void
+  setMoving(moving: boolean): void
+  /** The floor the user is on (for walls). Optional: StepKalman doesn't care. */
+  setFloor?(floorId: string | null): void
+  step(lengthM: number, headingDeg: number | null, headingAccuracyDeg: number, timestamp: number): void
+  update(e: number, n: number, accuracyM: number, timestamp: number, covariance?: StepFilterCovariance): void
+  predict(timestamp: number): void
+  state(): { e: number, n: number, ve: number, vn: number, accuracyM: number } | null
+  reset(): void
+}
 
 export interface StepKalmanOptions {
   /** Position random-walk noise between steps while walking (m^2/s): covers missed steps */
@@ -39,7 +57,7 @@ export const DEFAULT_STEP_KALMAN: StepKalmanOptions = {
 
 const RAD = Math.PI / 180
 
-export class StepKalman implements PositionFilter {
+export class StepKalman implements StepFilter {
   private e = 0
   private n = 0
   /** Covariance [[pee, pen], [pen, pnn]] */

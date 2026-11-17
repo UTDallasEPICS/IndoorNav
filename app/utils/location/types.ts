@@ -125,6 +125,21 @@ export interface Floor {
    * the app's coordinate convention (see CLAUDE.md). Floors without it get no MapPosition.
    */
   plan?: { width: number, height: number }
+  /**
+   * Where people can walk, from the floor's route grid. Lets the position filter keep the dot out of walls.
+   * Needs `plan`. Floors without it aren't constrained.
+   */
+  walkGrid?: FloorGrid
+}
+
+/** A floor's route grid (public/data/SPN*.txt) and where it sits on the floor's map. */
+export interface FloorGrid {
+  rows: number
+  cols: number
+  /** Every cell, row after row: 1 = wall, 0 = open */
+  walls: Uint8Array
+  /** The grid rows/columns (fractions allowed) where the map's 0–1 edges fall, as in GRID_BOUNDS (shared/grid-map.js) */
+  bounds: { top: number, bottom: number, left: number, right: number }
 }
 
 export interface Building {
