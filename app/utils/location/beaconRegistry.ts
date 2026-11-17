@@ -21,6 +21,10 @@ export interface StoredBeacon {
   pathLossExponent: number | null
   /** Vertical beacon-to-phone distance the survey's path-loss fit assumed */
   heightOffsetM: number | null
+  /** RMS misfit of the survey's path-loss fit (dB) */
+  fitRmseDb?: number | null
+  /** Major axis of the survey's 1-sigma position ellipse (m) */
+  sigmaMajorM?: number | null
 }
 
 export interface BeaconRegistryOptions {
@@ -65,7 +69,9 @@ export function toBeaconRegistry(
       enu: { e, n, u: floor.transform.floorZ + o.phoneHeightM + (row.heightOffsetM ?? o.defaultHeightOffsetM) },
       floorId: floor.id,
       txPower: row.txPowerDbm ?? o.defaultTxPower,
-      pathLossExponent: row.pathLossExponent ?? o.defaultPathLossExponent
+      pathLossExponent: row.pathLossExponent ?? o.defaultPathLossExponent,
+      ...(row.fitRmseDb != null && { rssiSigmaDb: row.fitRmseDb }),
+      ...(row.sigmaMajorM != null && { positionSigmaM: row.sigmaMajorM })
     })
   }
   return out

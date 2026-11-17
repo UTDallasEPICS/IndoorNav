@@ -224,7 +224,9 @@ export async function listBeacons(db: SqliteRemoteDatabase<typeof schema>): Prom
       longitude: beacons.longitude,
       txPowerDbm: beacons.tx_power_dbm,
       pathLossExponent: beacons.path_loss_exponent,
-      heightOffsetM: beacon_surveys.height_offset_m
+      heightOffsetM: beacon_surveys.height_offset_m,
+      fitRmseDb: beacons.fit_rmse_db,
+      sigmaMajorM: beacons.sigma_major_m
     })
     .from(beacons)
     .innerJoin(floors, eq(beacons.floor_id, floors.id))

@@ -90,8 +90,13 @@ export class StepKalman implements PositionFilter {
     this.pnn += along * un * un + across * ue * ue
   }
 
-  update(e: number, n: number, accuracyM: number, timestamp: number) {
-    const r = (accuracyM * accuracyM) / 2 * (this.moving ? 1 : this.options.stationaryMeasurementScale)
+  /** `covariance` (east/north, m^2) replaces the round `accuracyM` circle when the fix has an error ellipse. */
+  update(e: number, n: number, accuracyM: number, timestamp: number, covariance?: { ee: number, en: number, nn: number }) {
+    const scale = this.moving ? 1 : this.options.stationaryMeasurementScale
+    const r = (accuracyM * accuracyM) / 2 * scale
+    const ree = covariance ? covariance.ee * scale : r
+    const ren = covariance ? covariance.en * scale : 0
+    const rnn = covariance ? covariance.nn * scale : r
     if (this.lastTimestamp === null || timestamp - this.lastTimestamp > this.options.maxGapMs) {
       this.seed(e, n, accuracyM, timestamp)
       return
@@ -100,13 +105,13 @@ export class StepKalman implements PositionFilter {
 
     const de = e - this.e
     const dn = n - this.n
-    const see = this.pee + r
-    const snn = this.pnn + r
-    const sen = this.pen
+    const see = this.pee + ree
+    const snn = this.pnn + rnn
+    const sen = this.pen + ren
     const det = see * snn - sen * sen
     const d2 = (snn * de * de - 2 * sen * de * dn + see * dn * dn) / det
     if (d2 > this.options.gateChi2) {
-      this.rejected.push({ e, n, r })
+      this.rejected.push({ e, n, r: (ree + rnn) / 2 })
       if (this.rejected.length >= this.options.relocalizeAfter) this.relocalize()
       return
     }

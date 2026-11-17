@@ -36,7 +36,7 @@ describe('simulator building blocks', () => {
 })
 
 describe('end-to-end simulated walk', () => {
-  it.each(['weightedCentroid', 'leastSquares'] as const)('tracks the walk with the %s estimator', async (estimator) => {
+  it.each(['weightedCentroid', 'leastSquares', 'rssiFit'] as const)('tracks the walk with the %s estimator', async (estimator) => {
     const result = await runSimulation({ venue: sampleVenue, path: sampleWalk, ble: { estimator } })
     // Thresholds for this synthetic data (4 dB RSSI noise, imperfect path loss model). Real-world
     // accuracy has to be measured in the building.
@@ -65,6 +65,47 @@ describe('end-to-end simulated walk', () => {
       const pdr = await runSimulation({ venue: sampleVenue, path: sampleWalk, sim: { seed }, pdr: true })
       expect(pdr.report.jitterM).toBeLessThan(base.report.jitterM * 0.6)
       expect(pdr.report.meanM).toBeLessThan(base.report.meanM)
+    }
+  })
+
+  // Every beacon as a vBLE AP: heard as 9 beams, up to 12 dB apart, with the survey's fit describing the strongest
+  const vbleVenue = {
+    ...sampleVenue,
+    beacons: sampleVenue.beacons.map((b, i) => ({ ...b, id: `a023919cd30a4e79bbd9:41${(i + 16).toString(16)}0*e40000`, rssiSigmaDb: 4, positionSigmaM: 1.5 }))
+  }
+
+  it('tracks vBLE APs by their strongest beam, through shadowing', async () => {
+    for (const seed of [1, 2, 3]) {
+      const result = await runSimulation({ venue: vbleVenue, path: sampleWalk, sim: { seed, shadowingDb: 4 }, pdr: true })
+      // Reading the beams as one mixed stream put this at ~8 m mean, ~5 m jitter
+      expect(result.report.meanM).toBeLessThan(3.5)
+      expect(result.report.jitterM).toBeLessThan(1.2)
+      expect(result.report.floorCorrectRate).toBeGreaterThan(0.9)
+    }
+  })
+
+  it('the RSSI fit beats range trilateration on the fused track', async () => {
+    let fit = 0
+    let ranges = 0
+    for (const seed of [1, 2, 3, 4]) {
+      const sim = { seed, shadowingDb: 4 }
+      fit += (await runSimulation({ venue: vbleVenue, path: sampleWalk, sim, pdr: true })).report.meanM
+      ranges += (await runSimulation({ venue: vbleVenue, path: sampleWalk, sim, pdr: true, ble: { estimator: 'leastSquares' } })).report.meanM
+    }
+    expect(fit).toBeLessThan(ranges * 0.8)
+  })
+
+  it('a phone that hears 6 dB off the survey phone does better with offset tracking', async () => {
+    const off = { enabled: false, timeConstantMs: 20000, minBeacons: 5, maxDb: 10 }
+    for (const deviceOffsetDb of [-6, 6]) {
+      let tracked = 0
+      let untracked = 0
+      for (const seed of [1, 2, 3, 4]) {
+        const sim = { seed, shadowingDb: 4, deviceOffsetDb }
+        tracked += (await runSimulation({ venue: vbleVenue, path: sampleWalk, sim, pdr: true })).report.meanM
+        untracked += (await runSimulation({ venue: vbleVenue, path: sampleWalk, sim, pdr: true, ble: { deviceOffset: off } })).report.meanM
+      }
+      expect(tracked).toBeLessThan(untracked)
     }
   })
 

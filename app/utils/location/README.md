@@ -81,11 +81,11 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
 
 ```
 CapacitorBleScanner ─ BeaconAdvert ─► BleProvider
-                                        RssiFilterBank (median → 1D Kalman, stale eviction)
+                                        ApRssiBank (per AP: strongest beam each second, mean over 3 s)
                                         voteFloor (strongest beacons vote) ◄── floor ── BarometerProvider
                                                                             BarometerFloorTracker ◄─ CapacitorPressureSource
-                                        rssiToDistance (log-distance path loss)
-                                        estimator: weightedCentroid | leastSquares
+                                        device offset (this phone vs the survey phone, tracked slowly)
+                                        estimator: rssiFit | leastSquares | weightedCentroid
                                         └─► LocationFix (source 'ble') ─┐
 CapacitorGpsSource ─ GpsReading ─► GpsProvider ─► LocationFix ('gps') ─┤
 CapacitorMotionSource ─ accel + compass ─► PdrProvider                  │
@@ -121,8 +121,8 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
 
 ## Configuration you'll tune
 
-- `BleProvider` options: `estimator`, `updateIntervalMs` (1 s), `staleAfterMs` (4 s), `floorVoteTopN`,
-  `phoneHeightM`, and the RSSI filter (`medianWindow`, `processNoise`, `measurementNoise`).
+- `BleProvider` options: `estimator`, `updateIntervalMs` (1 s), `floorVoteTopN`, `phoneHeightM`, `rssi`
+  (`sliceMs`, `windowMs`), `extraSigmaDb` / `defaultSigmaDb` (how much readings are trusted) and `deviceOffset`.
 - Per beacon: `txPower` (RSSI at 1 m) and `pathLossExponent` come from the survey fit (see **Beacon data**).
   Re-survey to recalibrate; beacons without a fit use `DEFAULT_BEACON_REGISTRY_OPTIONS`.
 - `FusionEngine` options: Kalman `accelerationNoise`, indoor/outdoor `switchAfterMs`, `gpsGoodAccuracyM`,
@@ -134,6 +134,29 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
 - `BarometerFloorTracker` options (`providers/barometer/floorTracker.ts`): `switchFraction` (0.6 of the way to the
   next floor) and `dwellMs` (1.5 s) for switching, `minVoteShare` (0.8) and `anchorAfterMs` (3 s) for trusting BLE,
   `reanchorAfterMs` (20 s), `driftTimeConstantMs` (30 s). Floor heights are `floors.elevation_m` in the database.
+
+## From packets to a BLE fix
+
+Three things here have to match how bSLAM surveyed the beacons, or the survey's fits don't describe what the phone hears:
+
+- **RSSI per AP = its strongest beam** (`providers/ble/apRssi.ts`). The survey averaged each beam's packets over a
+  second and kept the strongest beam of that second. The app does the same, then averages 3 s of those. Mixing all
+  beams into one filter reads several dB low (every range too long) and jumps as different beams arrive.
+- **Fit in dB, not meters** (`rssiFit` in `estimators.ts`, a port of bSLAM's `Positioner`). A beacon's readings
+  scatter ~4 dB around its fit at any distance. As a range that's lopsided and grows with distance (5 dB is 1 m at
+  2 m but 8 m at 15 m), so range trilateration is dragged around by its far beacons. `rssiFit` grid-searches for the
+  spot whose predicted RSSIs best match the strongest 8 beacons, weighting each by its fit's `fit_rmse_db` and its
+  position uncertainty (`sigma_major_m`), and capping residuals at 3 sigma so one blocked beacon can't move the fix.
+- **An honest error ellipse.** The fix carries a `covariance` from the beacon geometry (long across a line of
+  hallway APs, tight where APs surround you), widened when the readings disagree with each other, and widened again
+  because fixes a second apart share most of their 3 s of packets. `StepKalman` uses the ellipse, so BLE pulls the
+  dot hard only in directions it actually knows.
+
+**Device offset.** Phones differ by several dB (model, case, hand), and the fits come from one survey phone. The
+average miss of each fix (heard minus predicted) shows this phone's offset; it's tracked with a 20 s time constant,
+limited to +/- 10 dB, and removed before the fit (`BleProviderOptions.deviceOffset`).
+
+The first fix waits for one second of packets, so the dot doesn't first appear on top of whichever AP was heard first.
 
 ## Smoothing with steps and compass (PDR)
 
@@ -225,5 +248,8 @@ in SPN1 (see the CSV/checkpoint success criterion in CLAUDE.md).
 - **Barometer:** not tested on a device yet. SPN1's floor-to-floor height (4.27 m) is a guess: measure it (pressure
   at the bottom and top of the stairs, ~0.12 hPa per meter) and update `elevation_m` in `app/db/seed.ts`. Opening
   doors and the building's air handling may cause small pressure jumps; check they stay well under 60% of a floor.
+- **BLE fix model:** the strongest-beam reading, `rssiFit` and the device offset are only checked in the simulator,
+  whose beam pattern (9 beams, 12 dB spread) is a guess. Check on a device that standing under a `good` AP reads
+  about 5 dB under its `tx_power_dbm` (1.5 m below it, n ~2.7), and log the offset on an iPhone and an Android.
 - **Walls:** nothing yet stops the dot from crossing a wall. A particle filter on the route grid
   (`EXTENSION POINT (particle filter)`) is the natural next step.

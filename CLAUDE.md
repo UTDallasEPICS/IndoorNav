@@ -166,6 +166,10 @@ Decision drivers to respect:
     (`fusion/stepKalman.ts`): steps move the dot, BLE corrects it, standing still averages BLE, outliers gated.
     Simulator: per-second jitter 2.6 → 1.0 m walking, 2.4 → 0.2 m standing; mean error 4.3 → 3.5 m.
     Not yet verified on a device.
+  - 2026-11-16: BLE fixes now use the survey's own measurement model (`providers/ble/apRssi.ts`, `rssiFit`): each AP
+    read as its strongest vBLE beam per second, position fitted in dB with outlier capping and an error ellipse,
+    per-phone RSSI offset tracked. Simulator with 9 beams + 4 dB shadowing: mean error 8.3 → 2.0 m, per-second
+    jitter 5.2 → 0.6 m. Not yet verified on a device.
 - [ ] Monitor beacon namespace/instance IDs for changes on OIT's side.
 - [ ] (Future-proofing) vSLAM locating reaches ≥ 60% of BLE precision in ideal conditions (no people around).
 

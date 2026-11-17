@@ -37,6 +37,18 @@ export interface SimOptions {
   wallLossDb: number
   /** Real-world path loss exponent minus the configured one, so the model isn't perfect */
   exponentMismatch: number
+  /**
+   * Shadowing (dB, 1 sigma): each beacon reads this much stronger or weaker depending on where you stand (walls,
+   * furniture), changing smoothly over `shadowingScaleM`. Unlike `rssiNoiseDb` it doesn't average out over time.
+   */
+  shadowingDb: number
+  shadowingScaleM: number
+  /** This phone hears every beacon this much stronger (+) or weaker (-) than the phone that surveyed them (dB) */
+  deviceOffsetDb: number
+  /** Beams per vBLE AP: a beacon with `*` in its ID is heard as this many IDs, with the `*` replaced by 0, 1, ... */
+  beams: number
+  /** How much weaker the beam pointing away from the phone is than the one pointing at it (dB) */
+  beamSpreadDb: number
   /** Adverts weaker than this aren't received (dBm) */
   minRssi: number
   gpsIntervalMs: number
@@ -67,6 +79,11 @@ export const DEFAULT_SIM: SimOptions = {
   floorLossDb: 15,
   wallLossDb: 10,
   exponentMismatch: 0.2,
+  shadowingDb: 0,
+  shadowingScaleM: 10,
+  deviceOffsetDb: 0,
+  beams: 9,
+  beamSpreadDb: 12,
   minRssi: -95,
   gpsIntervalMs: 1000,
   gps: {
@@ -118,20 +135,40 @@ export function generateAdverts(path: PathWaypoint[], venue: VenueConfig, option
   const rng = createRng(options.seed)
   const adverts: BeaconAdvert[] = []
   const endMs = path[path.length - 1]!.t * 1000
+  // Each beacon's shadowing is a few random waves across the floor, so it's smooth and repeatable
+  const shadowRng = createRng(options.seed + 3)
+  const waves = venue.beacons.map(() => Array.from({ length: 4 }, () => {
+    const angle = shadowRng.uniform() * 2 * Math.PI
+    const k = 2 * Math.PI / (options.shadowingScaleM * (0.6 + 0.8 * shadowRng.uniform()))
+    return { ke: k * Math.cos(angle), kn: k * Math.sin(angle), phase: shadowRng.uniform() * 2 * Math.PI }
+  }))
+  const shadowing = (i: number, e: number, n: number) => options.shadowingDb === 0 ? 0
+    : options.shadowingDb * Math.SQRT1_2 * waves[i]!.reduce((sum, w) => sum + Math.cos(w.ke * e + w.kn * n + w.phase), 0)
   for (let ms = 0; ms <= endMs; ms += options.advertIntervalMs) {
     const truth = truthAt(path, ms / 1000)
     const phoneFloor = truth.floorId ? index.floors.get(truth.floorId)!.floor : null
     const phoneU = (phoneFloor?.transform.floorZ ?? 0) + 1.2
-    for (const beacon of venue.beacons) {
+    for (const [i, beacon] of venue.beacons.entries()) {
       const beaconLevel = index.floors.get(beacon.floorId)!.floor.level
       const distance = Math.hypot(beacon.enu.e - truth.e, beacon.enu.n - truth.n, beacon.enu.u - phoneU)
       const loss = phoneFloor
         ? options.floorLossDb * Math.abs(phoneFloor.level - beaconLevel)
         : options.wallLossDb + options.floorLossDb * Math.abs(beaconLevel - 1)
-      const rssi = distanceToRssi(distance, beacon.txPower, beacon.pathLossExponent + options.exponentMismatch)
-        - loss + rng.gaussian() * options.rssiNoiseDb
-      if (rssi >= options.minRssi) {
-        adverts.push({ beaconId: beacon.id, rssi: Math.round(rssi), timestamp: options.startTime + ms })
+      const mean = distanceToRssi(distance, beacon.txPower, beacon.pathLossExponent + options.exponentMismatch)
+        - loss + shadowing(i, truth.e, truth.n) + options.deviceOffsetDb
+      if (!beacon.id.includes('*')) {
+        const rssi = mean + rng.gaussian() * options.rssiNoiseDb
+        if (rssi >= options.minRssi) adverts.push({ beaconId: beacon.id, rssi: Math.round(rssi), timestamp: options.startTime + ms })
+        continue
+      }
+      // vBLE: the beams point around the compass, and the one pointing at the phone is the one the survey fitted
+      const bearing = Math.atan2(truth.e - beacon.enu.e, truth.n - beacon.enu.n)
+      for (let beam = 0; beam < options.beams; beam++) {
+        const off = (1 - Math.cos(bearing - 2 * Math.PI * beam / options.beams)) / 2
+        const rssi = mean - options.beamSpreadDb * off + rng.gaussian() * options.rssiNoiseDb
+        if (rssi >= options.minRssi) {
+          adverts.push({ beaconId: beacon.id.replace('*', String(beam)), rssi: Math.round(rssi), timestamp: options.startTime + ms })
+        }
       }
     }
   }

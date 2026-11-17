@@ -256,8 +256,10 @@ describe('BleProvider with a floor selector', () => {
     const fixes: LocationFix[] = []
     provider.onFix((fix) => fixes.push(fix))
     await provider.start(sampleVenue)
-    for (const b of sampleVenue.beacons.filter((b) => b.floorId === 'test-l1')) {
-      scanner.emit({ beaconId: b.id, rssi: -60, timestamp: 0 })
+    for (const timestamp of [0, 1000]) { // the first fix comes after a second of scanning
+      for (const b of sampleVenue.beacons.filter((b) => b.floorId === 'test-l1')) {
+        scanner.emit({ beaconId: b.id, rssi: -60, timestamp })
+      }
     }
     expect(fixes.at(-1)?.floorId).toBe('test-l1')
   })
