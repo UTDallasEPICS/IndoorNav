@@ -8,6 +8,7 @@ import { listBeacons } from '~/db/beacons'
 import { listFloors } from '~/db/floors'
 import { GRID_BOUNDS } from '#shared/grid-map'
 import { createFileDebugLog, type FileDebugLog } from '~/utils/location/debug/capacitorFileLog'
+import { clearOpenAreas, openAreaOutlines, type RoomRecord } from '~/utils/location/fusion/openAreas'
 import { createDeviceLocationService, requestMotionPermission, spnVenue, withFloorGrids, withStoredBeacons, withStoredFloors, type BarometerReading, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
 import { loadRouteGrid, routeBetween } from '~/utils/route-between'
 
@@ -18,12 +19,15 @@ type MapPoint = { x: number, y: number, floor: number } // fractions (0–1) of 
 /** Floors with a route grid (public/data/SPN.txt and SPN-level2.txt) */
 const ROUTABLE_FLOORS = [1, 2]
 
+/** Floors whose route grid also keeps the location dot out of walls (particle filter) */
+const WALL_CONSTRAINED_FLOORS = [1, 2]
+
 /**
- * Floors whose route grid also keeps the location dot out of walls (particle filter). Not level 2 yet: its grid
- * includes furniture, and on a recorded level 2 walk (2026-11-17) the walls made the dot jump twice as often as
- * without them (58 vs 27 jumps over 1 m). Add 2 once it has a walls-only grid.
+ * Rooms whose desks and cubicles the grid draws as walls, cleared for the location dot (not for routing) so it
+ * moves freely inside them; their own walls stay. Without this, a recorded level 2 walk (2026-11-17) through the
+ * open offices jumped over 1 m 51 times vs 31 with them cleared. Only rooms with a CAD outline can be cleared.
  */
-const WALL_CONSTRAINED_FLOORS = [1]
+const OPEN_AREA_NAMES = ['OPEN OFFICE']
 
 /** A position older than this is dropped, so the dot doesn't sit still after we stop hearing beacons */
 const STALE_AFTER_MS = 10_000
@@ -103,9 +107,7 @@ export function useNavigation() {
       venue = withStoredBeacons(withStoredFloors(spnVenue, await listFloors(db)), await listBeacons(db))
       // The route grids of WALL_CONSTRAINED_FLOORS also keep the dot out of walls. A floor whose grid fails to load
       // just isn't constrained.
-      const grids = await Promise.all(WALL_CONSTRAINED_FLOORS.map(floor => loadRouteGrid(floor)
-        .then(grid => [floor, { grid, bounds: GRID_BOUNDS[floor as keyof typeof GRID_BOUNDS] }] as const)
-        .catch(() => null)))
+      const grids = await Promise.all(WALL_CONSTRAINED_FLOORS.map(floor => loadWallGrid(floor).catch(() => null)))
       venue = withFloorGrids(venue, Object.fromEntries(grids.filter(g => g !== null)))
     } catch (err) {
       if (service === created) {
@@ -170,6 +172,21 @@ export function useNavigation() {
     canRoute,
     routeTo
   }
+}
+
+/** A floor's route grid for the location dot: the routing grid with open-plan rooms (OPEN_AREA_NAMES) cleared. */
+async function loadWallGrid(floor: number) {
+  const bounds = GRID_BOUNDS[floor as keyof typeof GRID_BOUNDS]
+  const grid = await loadRouteGrid(floor)
+  let rooms: RoomRecord[] = []
+  try {
+    rooms = await $fetch<RoomRecord[]>(`/maps/spn-level${floor}-rooms.json`)
+  } catch (err) {
+    console.warn(`Level ${floor} rooms didn't load, so its open offices keep their furniture as walls:`, err)
+  }
+  const { outlines, missing } = openAreaOutlines(rooms, OPEN_AREA_NAMES)
+  if (missing.length) console.warn(`Level ${floor} open areas without an outline (furniture kept as walls): ${missing.join(', ')}`)
+  return [floor, { grid: outlines.length ? clearOpenAreas(grid, bounds, outlines) : grid, bounds }] as const
 }
 
 /** Whether this build records the location debug log (nuxt.config.ts: runtimeConfig.public.locationDebugLog) */

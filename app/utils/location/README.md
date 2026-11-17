@@ -202,9 +202,13 @@ instead of `StepKalman`. Same inputs, same error model; it just also knows the w
   are nudged apart by 0.3 m (`resampleJitterM`), or walls shrink the cloud until it ignores BLE.
 - `FusionOptions.stepFilterKind` forces `'kalman'` or `'particle'`. Floors without a grid (and outdoors) use
   StepKalman.
-- **Only level 1 for now** (`WALL_CONSTRAINED_FLOORS` in `useNavigation.ts`). Level 2's grid includes furniture: a
-  recorded level 2 walk (2026-11-17, replayed from its debug log) jumped over 1 m 58 times with it versus 27 without,
-  and the mean landed in a wall 187 times. Add level 2 back once it has a walls-only grid.
+- **Open-plan rooms are cleared** (`fusion/openAreas.ts`). The level 2 grid draws desks and cubicles as walls, which
+  chopped the cloud up: on a recorded level 2 walk (2026-11-17, replayed from its debug log) the dot jumped over 1 m
+  51 times and its mean landed in a wall 156 times. `useNavigation` clears the inside of every room named in
+  `OPEN_AREA_NAMES` (default `OPEN OFFICE`) using its CAD `outline`, keeping a 3-cell band along the outline (the
+  room's walls); corridors and other rooms keep every wall. Same walk: 31 jumps, 62 wall snaps. Routing still uses
+  the full grid. Level 2 open offices 2.120 and 2.203 have no outline in the rooms JSON, so they keep their
+  furniture until the CAD pipeline finds their outlines.
 
 Simulator, 4 A* routes on SPN1 level 1 with the surveyed APs (`sim/spnWalk.ts`), 8 seeds, after the first 15 s:
 
