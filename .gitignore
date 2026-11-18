@@ -35,3 +35,7 @@ cad-source/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Location debug logs copied off phones (contain walk positions)
+location-logs/
+*.jsonl

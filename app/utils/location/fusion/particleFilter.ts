@@ -14,6 +14,7 @@
 // (e.g. walled into the wrong room) and restarts around them. A wall missing a door on the map slows the dot down
 // rather than stopping it: the particles that cross are only down-weighted.
 
+import { NO_DEBUG_LOG, type DebugLog } from '../debug/debugLog'
 import { createRng, type Rng } from '../random'
 import type { StepFilter, StepFilterCovariance } from './stepKalman'
 import type { WalkableMap } from './walkableMap'
@@ -79,8 +80,12 @@ export class ParticleFilter implements StepFilter {
   private moving = false
   private floorId: string | null = null
   private rejected: Array<{ e: number, n: number, cov: StepFilterCovariance }> = []
+  /** Effective sample size after the last reweighting (debug log) */
+  private lastEss = 0
+  /** Cloud mean of the last wall snap logged, so repeated state() calls log it once */
+  private lastSnapKey = ''
 
-  constructor(private map: WalkableMap, options: Partial<ParticleFilterOptions> = {}) {
+  constructor(private map: WalkableMap, options: Partial<ParticleFilterOptions> = {}, private debug: DebugLog = NO_DEBUG_LOG) {
     this.options = { ...DEFAULT_PARTICLE_FILTER, ...options }
     this.rng = createRng(this.options.seed)
     this.n = this.options.particles
@@ -96,6 +101,7 @@ export class ParticleFilter implements StepFilter {
     const s = this.state()
     if (!s || this.lastTimestamp === null) return
     const v = s.accuracyM ** 2 / 2 + 1
+    this.debug.log('pf.floor', { floorId, e: s.e, n: s.n, sigmaM: Math.sqrt(v) })
     this.scatter(s.e, s.n, { ee: v, en: 0, nn: v }, this.lastTimestamp)
   }
 
@@ -132,9 +138,22 @@ export class ParticleFilter implements StepFilter {
       }
     }
     // If nearly every particle walked through a wall, the map is probably missing an opening: let it go this step
-    if (crossings === 0 || crossings > 0.99 * this.n) return
-    for (let i = 0; i < this.n; i++) if (crossed[i]) this.weight[i]! *= o.wallCrossWeight
-    this.normalizeAndResample()
+    const allCrossed = crossings > 0.99 * this.n
+    let resampled = false
+    if (crossings > 0 && !allCrossed) {
+      for (let i = 0; i < this.n; i++) if (crossed[i]) this.weight[i]! *= o.wallCrossWeight
+      resampled = this.normalizeAndResample()
+    }
+    if (this.debug.enabled) {
+      const s = this.moments()
+      this.debug.log('pf.step', {
+        timestamp, lengthM, headingDeg, headingAccuracyDeg, stretch,
+        crossings, allCrossed, resampled,
+        // Effective particles left after the wall penalty (before any resampling)
+        ess: crossings > 0 && !allCrossed ? this.lastEss : null,
+        e: s.e, n: s.n, spreadM: Math.sqrt(s.ee + s.nn)
+      })
+    }
   }
 
   update(e: number, n: number, accuracyM: number, timestamp: number, covariance?: StepFilterCovariance) {
@@ -143,6 +162,7 @@ export class ParticleFilter implements StepFilter {
     const base = covariance ?? { ee: r, en: 0, nn: r }
     const cov = { ee: base.ee * scale, en: base.en * scale, nn: base.nn * scale }
     if (!this.live || this.lastTimestamp === null || timestamp - this.lastTimestamp > this.options.maxGapMs) {
+      this.debug.log('pf.reseed', { timestamp, reason: this.live ? 'gap' : 'not live', e, n, accuracyM: Math.sqrt(base.ee + base.nn) })
       this.seed(e, n, Math.sqrt(base.ee + base.nn), timestamp)
       return
     }
@@ -159,6 +179,7 @@ export class ParticleFilter implements StepFilter {
     const d2 = (snn * de * de - 2 * sen * de * dn + see * dn * dn) / det
     if (d2 > this.options.gateChi2) {
       this.rejected.push({ e, n, cov })
+      this.debug.log('pf.update', { timestamp, e, n, moving: this.moving, d2, gated: true, rejectedInRow: this.rejected.length, cloudE: s.e, cloudN: s.n, spreadM: Math.sqrt(s.ee + s.nn) })
       if (this.rejected.length >= this.options.relocalizeAfter) this.relocalize(timestamp)
       return
     }
@@ -174,7 +195,14 @@ export class ParticleFilter implements StepFilter {
       const m2 = iee * pe * pe + 2 * ien * pe * pn + inn * pn * pn
       this.weight[i]! *= Math.exp(-0.5 * Math.min(m2, 50))
     }
-    this.normalizeAndResample()
+    const resampled = this.normalizeAndResample()
+    if (this.debug.enabled) {
+      const after = this.moments()
+      this.debug.log('pf.update', {
+        timestamp, e, n, moving: this.moving, d2, gated: false, ess: this.lastEss, resampled,
+        cloudE: after.e, cloudN: after.n, spreadM: Math.sqrt(after.ee + after.nn)
+      })
+    }
   }
 
   predict(timestamp: number) {
@@ -197,6 +225,11 @@ export class ParticleFilter implements StepFilter {
           e = this.pe[i]!
           n = this.pn[i]!
         }
+      }
+      const key = `${s.e},${s.n}`
+      if (this.debug.enabled && key !== this.lastSnapKey) {
+        this.lastSnapKey = key
+        this.debug.log('pf.snap', { meanE: s.e, meanN: s.n, e, n, distM: Math.hypot(e - s.e, n - s.n), spreadM: Math.sqrt(s.ee + s.nn) })
       }
     }
     return { e, n, ve: 0, vn: 0, accuracyM: Math.sqrt(s.ee + s.nn) }
@@ -272,20 +305,25 @@ export class ParticleFilter implements StepFilter {
     return { e, n, ee, en, nn }
   }
 
-  /** Normalizes the weights and, once too few particles carry most of the weight, resamples (systematic). */
-  private normalizeAndResample() {
+  /**
+   * Normalizes the weights and, once too few particles carry most of the weight, resamples (systematic).
+   * Returns whether it resampled.
+   */
+  private normalizeAndResample(): boolean {
     let sum = 0
     for (let i = 0; i < this.n; i++) sum += this.weight[i]!
     if (!(sum > 0)) {
       this.weight.fill(1 / this.n)
-      return
+      this.lastEss = 0
+      return false
     }
     let sumSq = 0
     for (let i = 0; i < this.n; i++) {
       this.weight[i]! /= sum
       sumSq += this.weight[i]! ** 2
     }
-    if (1 / sumSq >= this.n / 2) return
+    this.lastEss = 1 / sumSq
+    if (this.lastEss >= this.n / 2) return false
 
     const pe = new Float64Array(this.n)
     const pn = new Float64Array(this.n)
@@ -309,6 +347,7 @@ export class ParticleFilter implements StepFilter {
     this.pe = pe
     this.pn = pn
     this.weight.fill(1 / this.n)
+    return true
   }
 
   /** Several fixes in a row disagree with the cloud: restart around their precision-weighted average. */
@@ -321,6 +360,7 @@ export class ParticleFilter implements StepFilter {
       wn += 1 / fix.cov.nn
     }
     const k = this.rejected.length
+    this.debug.log('pf.relocalize', { timestamp, e: e / we, n: n / wn, fixes: k, sigmaM: Math.sqrt(k / we + k / wn) })
     this.scatter(e / we, n / wn, { ee: k / we, en: 0, nn: k / wn }, timestamp)
   }
 }

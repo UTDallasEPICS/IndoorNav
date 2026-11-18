@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { MemoryDebugLog } from '../debug/debugLog'
 import { sampleVenue } from '../fixtures/sampleVenue'
 import type { VenueConfig } from '../types'
 import { ParticleFilter } from './particleFilter'
@@ -103,5 +104,43 @@ describe('ParticleFilter', () => {
     filter.seed(120, 65, 3, 0)
     const s = filter.state()!
     expect(map.isOpen('test-l1', s.e, s.n)).toBe(true)
+  })
+})
+
+describe('ParticleFilter debug log', () => {
+  it('logs each step: heading stretch, cloud spread and wall crossings', () => {
+    const log = new MemoryDebugLog()
+    const filter = new ParticleFilter(createWalkableMap(venueWithWall()), {}, log)
+    filter.setFloor('test-l1')
+    filter.seed(120, 66, 1, 0)
+    filter.step(0.7, 180, 60, 500) // toward the wall with a poor compass
+    const [step] = log.of('pf.step')
+    expect(step).toMatchObject({ lengthM: 0.7, headingDeg: 180, headingAccuracyDeg: 60 })
+    expect(step!.stretch as number).toBeCloseTo(Math.exp((60 * Math.PI / 180) ** 2 / 2), 6)
+    expect(step!.crossings as number).toBeGreaterThan(0)
+    expect(step!.spreadM as number).toBeGreaterThan(0)
+  })
+
+  it('logs gated fixes and the relocalization they lead to', () => {
+    const log = new MemoryDebugLog()
+    const filter = new ParticleFilter(createWalkableMap(venueWithWall()), {}, log)
+    filter.setFloor('test-l1')
+    filter.seed(120, 70, 1, 0)
+    filter.setMoving(true)
+    for (let t = 1000; t <= 4000; t += 1000) filter.update(120, 58, 2, t)
+    expect(log.of('pf.update').map((u) => u.gated)).toEqual([true, true, true, true])
+    expect(log.of('pf.relocalize')).toEqual([expect.objectContaining({ fixes: 4 })])
+  })
+
+  it('logs when the shown position is snapped off a wall, once per cloud', () => {
+    const log = new MemoryDebugLog()
+    const filter = new ParticleFilter(createWalkableMap(venueWithWall()), {}, log)
+    filter.setFloor('test-l1')
+    filter.seed(120, 65, 3, 0)
+    filter.state()
+    filter.state()
+    const snaps = log.of('pf.snap')
+    expect(snaps.length).toBeLessThanOrEqual(1)
+    if (snaps.length) expect(snaps[0]!.distM as number).toBeGreaterThan(0)
   })
 })

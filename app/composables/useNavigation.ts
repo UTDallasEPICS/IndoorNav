@@ -7,6 +7,8 @@ import { readonly, ref } from 'vue'
 import { listBeacons } from '~/db/beacons'
 import { listFloors } from '~/db/floors'
 import { GRID_BOUNDS } from '#shared/grid-map'
+import { createFileDebugLog, type FileDebugLog } from '~/utils/location/debug/capacitorFileLog'
+import { clearOpenAreas, openAreaOutlines, type RoomRecord } from '~/utils/location/fusion/openAreas'
 import { createDeviceLocationService, requestMotionPermission, spnVenue, withFloorGrids, withStoredBeacons, withStoredFloors, type BarometerReading, type LocationService, type MapPosition, type ProviderStatus } from '~/utils/location/LocationService'
 import { loadRouteGrid, routeBetween } from '~/utils/route-between'
 
@@ -16,6 +18,16 @@ type MapPoint = { x: number, y: number, floor: number } // fractions (0–1) of 
 
 /** Floors with a route grid (public/data/SPN.txt and SPN-level2.txt) */
 const ROUTABLE_FLOORS = [1, 2]
+
+/** Floors whose route grid also keeps the location dot out of walls (particle filter) */
+const WALL_CONSTRAINED_FLOORS = [1, 2]
+
+/**
+ * Rooms whose desks and cubicles the grid draws as walls, cleared for the location dot (not for routing) so it
+ * moves freely inside them; their own walls stay. Without this, a recorded level 2 walk (2026-11-17) through the
+ * open offices jumped over 1 m 51 times vs 31 with them cleared. Only rooms with a CAD outline can be cleared.
+ */
+const OPEN_AREA_NAMES = ['OPEN OFFICE']
 
 /** A position older than this is dropped, so the dot doesn't sit still after we stop hearing beacons */
 const STALE_AFTER_MS = 10_000
@@ -32,6 +44,12 @@ const locationLost = ref(false)
 const barometerStatus = ref<ProviderStatus['state']>('idle')
 const barometerMessage = ref('')
 const barometerReading = ref<BarometerReading | null>(null)
+// Step + compass tracking: without it the dot is BLE alone and jumps around more
+const motionStatus = ref<ProviderStatus['state']>('idle')
+const motionRetryFailed = ref(false) // "Allow motion" was tapped and iOS still said no
+// Location debug log (NUXT_PUBLIC_LOCATION_DEBUG_LOG): the file this run writes to, or null when off
+const debugLogFile = ref<string | null>(null)
+let debugLog: FileDebugLog | null = null
 let lastHeardAt = 0 // when we last had a position, or when scanning started
 let service: LocationService | null = null
 let staleTimer: ReturnType<typeof setInterval> | null = null
@@ -51,10 +69,21 @@ export function useNavigation() {
     // so ask now, before the awaits below; the PDR provider reads the answer when it starts.
     void requestMotionPermission()
 
+    // Debug builds can record every sensor input and filter decision to a file on the phone (stays on it, C02)
+    if (isDebugLogOn()) {
+      debugLog = createFileDebugLog()
+      debugLogFile.value = debugLog.path
+    }
+
     // GPS is off: it was removed from the map page and doesn't help inside SPN1
-    const created = createDeviceLocationService({ gps: false })
+    const created = createDeviceLocationService({ gps: false, ...(debugLog && { debugLog: debugLog.log }) })
     service = created
     created.onStatus(status => {
+      if (status.provider === 'pdr') {
+        motionStatus.value = status.state
+        if (status.state === 'running') motionRetryFailed.value = false
+        return
+      }
       if (status.provider === 'barometer') {
         barometerStatus.value = status.state
         barometerMessage.value = status.message ?? ''
@@ -84,10 +113,9 @@ export function useNavigation() {
     try {
       const db = await useDb()
       venue = withStoredBeacons(withStoredFloors(spnVenue, await listFloors(db)), await listBeacons(db))
-      // The route grids also keep the dot out of walls. A floor whose grid fails to load just isn't constrained.
-      const grids = await Promise.all(ROUTABLE_FLOORS.map(floor => loadRouteGrid(floor)
-        .then(grid => [floor, { grid, bounds: GRID_BOUNDS[floor as keyof typeof GRID_BOUNDS] }] as const)
-        .catch(() => null)))
+      // The route grids of WALL_CONSTRAINED_FLOORS also keep the dot out of walls. A floor whose grid fails to load
+      // just isn't constrained.
+      const grids = await Promise.all(WALL_CONSTRAINED_FLOORS.map(floor => loadWallGrid(floor).catch(() => null)))
       venue = withFloorGrids(venue, Object.fromEntries(grids.filter(g => g !== null)))
     } catch (err) {
       if (service === created) {
@@ -119,7 +147,27 @@ export function useNavigation() {
     barometerStatus.value = 'idle'
     barometerMessage.value = ''
     barometerReading.value = null
+    motionStatus.value = 'idle'
+    motionRetryFailed.value = false
     await stopping.stop()
+    if (debugLog) {
+      const closing = debugLog
+      debugLog = null
+      debugLogFile.value = null
+      await closing.log.close()
+    }
+  }
+
+  /** Asks for motion access again and restarts step + compass tracking. Call it from a tap (iOS prompts only then). */
+  async function retryMotion() {
+    const asked = requestMotionPermission() // before any await, so it's still inside the tap
+    if (!service) return
+    const granted = await asked
+    if (!granted) {
+      motionRetryFailed.value = true
+      return
+    }
+    await service.restartMotion()
   }
 
   function canRoute(start: MapPoint, destination: MapPoint) {
@@ -140,9 +188,34 @@ export function useNavigation() {
     barometerStatus: readonly(barometerStatus),
     barometerMessage: readonly(barometerMessage),
     barometerReading: readonly(barometerReading), // pressure, height, barometer floor vs BLE vote; null before the first sample
+    debugLogFile: readonly(debugLogFile), // file the location debug log is writing to, or null when it's off
+    motionStatus: readonly(motionStatus), // step + compass tracking: 'running', 'permission-denied', 'unavailable', ...
+    motionRetryFailed: readonly(motionRetryFailed), // retryMotion() was refused again: relaunching the app is the way out
+    retryMotion,
     startLocation,
     stopLocation,
     canRoute,
     routeTo
   }
+}
+
+/** A floor's route grid for the location dot: the routing grid with open-plan rooms (OPEN_AREA_NAMES) cleared. */
+async function loadWallGrid(floor: number) {
+  const bounds = GRID_BOUNDS[floor as keyof typeof GRID_BOUNDS]
+  const grid = await loadRouteGrid(floor)
+  let rooms: RoomRecord[] = []
+  try {
+    rooms = await $fetch<RoomRecord[]>(`/maps/spn-level${floor}-rooms.json`)
+  } catch (err) {
+    console.warn(`Level ${floor} rooms didn't load, so its open offices keep their furniture as walls:`, err)
+  }
+  const { outlines, missing } = openAreaOutlines(rooms, OPEN_AREA_NAMES)
+  if (missing.length) console.warn(`Level ${floor} open areas without an outline (furniture kept as walls): ${missing.join(', ')}`)
+  return [floor, { grid: outlines.length ? clearOpenAreas(grid, bounds, outlines) : grid, bounds }] as const
+}
+
+/** Whether this build records the location debug log (nuxt.config.ts: runtimeConfig.public.locationDebugLog) */
+function isDebugLogOn() {
+  const value: unknown = useRuntimeConfig().public.locationDebugLog
+  return value === true || value === 'true' || value === '1'
 }

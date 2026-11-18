@@ -8,6 +8,8 @@
 // - A BLE fix far outside the filter's uncertainty (multipath, a body in the way) is dropped. If several in a row
 //   are dropped, the filter assumes it's the one that's lost and restarts at their average.
 
+import { NO_DEBUG_LOG, type DebugLog } from '../debug/debugLog'
+
 /** East/north covariance (m^2) */
 export interface StepFilterCovariance {
   ee: number
@@ -68,7 +70,7 @@ export class StepKalman implements StepFilter {
   private moving = false
   private rejected: Array<{ e: number, n: number, r: number }> = []
 
-  constructor(private options: StepKalmanOptions = DEFAULT_STEP_KALMAN) {}
+  constructor(private options: StepKalmanOptions = DEFAULT_STEP_KALMAN, private debug: DebugLog = NO_DEBUG_LOG) {}
 
   /** Starts at a known position with a 1-sigma horizontal accuracy */
   seed(e: number, n: number, accuracyM: number, timestamp: number) {
@@ -116,6 +118,7 @@ export class StepKalman implements StepFilter {
     const ren = covariance ? covariance.en * scale : 0
     const rnn = covariance ? covariance.nn * scale : r
     if (this.lastTimestamp === null || timestamp - this.lastTimestamp > this.options.maxGapMs) {
+      this.debug.log('kf.reseed', { timestamp, reason: this.lastTimestamp === null ? 'not live' : 'gap', e, n, accuracyM })
       this.seed(e, n, accuracyM, timestamp)
       return
     }
@@ -128,6 +131,11 @@ export class StepKalman implements StepFilter {
     const sen = this.pen + ren
     const det = see * snn - sen * sen
     const d2 = (snn * de * de - 2 * sen * de * dn + see * dn * dn) / det
+    this.debug.log('kf.update', {
+      timestamp, e, n, moving: this.moving, d2, gated: d2 > this.options.gateChi2,
+      ...(d2 > this.options.gateChi2 && { rejectedInRow: this.rejected.length + 1 }),
+      estE: this.e, estN: this.n, spreadM: Math.sqrt(this.pee + this.pnn)
+    })
     if (d2 > this.options.gateChi2) {
       this.rejected.push({ e, n, r: (ree + rnn) / 2 })
       if (this.rejected.length >= this.options.relocalizeAfter) this.relocalize()
@@ -189,6 +197,7 @@ export class StepKalman implements StepFilter {
     this.n = n / w
     this.pee = this.pnn = this.rejected.length / w
     this.pen = 0
+    this.debug.log('kf.relocalize', { e: this.e, n: this.n, fixes: this.rejected.length, sigmaM: Math.sqrt(this.pee + this.pnn) })
     this.rejected = []
   }
 }

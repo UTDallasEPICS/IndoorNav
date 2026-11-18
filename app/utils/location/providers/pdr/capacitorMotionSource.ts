@@ -16,14 +16,20 @@ let permission: Promise<boolean> | null = null
 
 /**
  * Asks for motion + orientation permission (iOS 13+; elsewhere it's always granted). iOS only shows the prompt
- * when this runs inside a user tap, so call it before the first `await` of the tap's handler. Asks once per launch.
+ * when this runs inside a user tap, so call it before the first `await` of the tap's handler. A yes is kept for
+ * the launch; after a no (or a failed request) the next call asks again. iOS may answer no without showing the
+ * prompt again until the app is relaunched.
  */
 export function requestMotionPermission(): Promise<boolean> {
   if (permission) return permission
   // Both requests start synchronously, so both are still inside the tap
   const requests = ([globalThis.DeviceMotionEvent, globalThis.DeviceOrientationEvent] as PermissionRequester[])
     .map((api) => (typeof api?.requestPermission === 'function' ? api.requestPermission() : 'granted'))
-  permission = Promise.all(requests).then((answers) => answers.every((answer) => answer === 'granted')).catch(() => {
+  permission = Promise.all(requests).then((answers) => {
+    const granted = answers.every((answer) => answer === 'granted')
+    if (!granted) permission = null // let a later tap ask again
+    return granted
+  }).catch(() => {
     permission = null // e.g. not called from a tap: try again next time
     return false
   })

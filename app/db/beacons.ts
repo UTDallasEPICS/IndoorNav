@@ -66,8 +66,18 @@ export function surveyLocalToWgs84(x: number, y: number, floor: SurveyFloorMeta)
 
 const isClockwise = (floor: SurveyFloorMeta) => !/counterclockwise/i.test(floor.y_axis)
 
+/**
+ * Which of an `ambiguous` beacon's two solutions is right, by lowercase instance: decided by a person (e.g. from where
+ * the AP is mounted), so the beacon is stored as `manual` at that position and used for positioning.
+ */
+export type AmbiguityResolutions = Record<string, 'primary' | 'alternate'>
+
 /** Parses a bSLAM beacon export (`*_beacons_*.csv`). Non-Eddystone-UID rows are skipped: the app only scans Eddystone-UID. */
-export function parseBeaconSurvey(csv: string, floor: SurveyFloorMeta): { beacons: SurveyedBeacon[], skipped: number } {
+export function parseBeaconSurvey(
+  csv: string,
+  floor: SurveyFloorMeta,
+  resolutions: AmbiguityResolutions = {}
+): { beacons: SurveyedBeacon[], skipped: number } {
   const [header, ...rows] = parseCsv(csv)
   if (!header) return { beacons: [], skipped: 0 }
   const col = new Map(header.map((name, i) => [name.trim(), i]))
@@ -107,14 +117,18 @@ export function parseBeaconSurvey(csv: string, floor: SurveyFloorMeta): { beacon
       ?? (num('latitude') === null || num('longitude') === null ? null : { lat: num('latitude')!, lon: num('longitude')! })
     const alternate = localToWgs84('alternate_x_m', 'alternate_y_m')
     const peak = localToWgs84('peak_x_m', 'peak_y_m')
+    const status = text('status') ?? 'insufficient'
+    const resolution = status === 'ambiguous' && position ? resolutions[instance] : undefined
+    const chosen = resolution === 'alternate' && alternate ? alternate : position
+    const other = resolution === 'alternate' && alternate ? position : alternate
     out.push({
       namespace,
       instance,
       label: text('label'),
-      status: text('status') ?? 'insufficient',
+      status: resolution ? 'manual' : status,
       position_source: source === 'manual' || source === 'auto' ? source : 'none',
-      latitude: position?.lat ?? null,
-      longitude: position?.lon ?? null,
+      latitude: chosen?.lat ?? null,
+      longitude: chosen?.lon ?? null,
       sigma_major_m: num('sigma_major_m'),
       sigma_minor_m: num('sigma_minor_m'),
       // The export's angle is in the local frame; store it as a compass bearing of the major axis
@@ -122,8 +136,8 @@ export function parseBeaconSurvey(csv: string, floor: SurveyFloorMeta): { beacon
         ? null
         : (((floor.geo.x_axis_bearing_deg + (isClockwise(floor) ? ellipseAngle : -ellipseAngle)) % 180) + 180) % 180,
       radius_95_m: num('radius_95_m'),
-      alternate_latitude: alternate?.lat ?? null,
-      alternate_longitude: alternate?.lon ?? null,
+      alternate_latitude: other?.lat ?? null,
+      alternate_longitude: other?.lon ?? null,
       tx_power_dbm: num('tx_power_1m_dbm'),
       path_loss_exponent: num('path_loss_exponent'),
       fit_rmse_db: num('fit_rmse_db'),
@@ -137,7 +151,7 @@ export function parseBeaconSurvey(csv: string, floor: SurveyFloorMeta): { beacon
       first_seen: text('first_seen'),
       last_seen: text('last_seen'),
       updated_at: text('updated_at'),
-      notes: text('notes')
+      notes: resolution ? [text('notes'), `ambiguous in the survey; ${resolution} solution chosen by hand`].filter(Boolean).join('; ') : text('notes')
     })
   }
   return { beacons: out, skipped }
@@ -160,11 +174,11 @@ const INSERT_CHUNK = 25
  */
 export async function importBeaconSurvey(
   db: SqliteRemoteDatabase<typeof schema>,
-  survey: { floorId: number, name: string, csv: string, floor: SurveyFloorMeta }
+  survey: { floorId: number, name: string, csv: string, floor: SurveyFloorMeta, resolutions?: AmbiguityResolutions }
 ) {
   if (await isSurveyImported(db, survey.name)) return { imported: 0, skipped: 0 }
 
-  const { beacons: rows, skipped } = parseBeaconSurvey(survey.csv, survey.floor)
+  const { beacons: rows, skipped } = parseBeaconSurvey(survey.csv, survey.floor, survey.resolutions)
 
   // The survey row is written first so beacons can point at it, but marked imported (imported_at) only at the end
   await db.insert(beacon_surveys).values({

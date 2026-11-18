@@ -10,6 +10,8 @@ import { MockBleScanner } from './providers/ble/scanner'
 import type { BeaconRegistryEntry, FloorTransform, MapPosition, VenueConfig } from './types'
 import { indexVenue } from './venue'
 import { SPN_LEVEL1_FIT, SPN_ORIGIN, spnVenue } from './venues/spn'
+import { PdrProvider } from './providers/pdr/PdrProvider'
+import { MockMotionSource } from './providers/pdr/motionSource'
 
 describe('fitFloorTransform', () => {
   it('recovers a known transform from its own control points', () => {
@@ -111,5 +113,24 @@ describe('LocationService map positions', () => {
 
     await service.stop()
     expect(service.currentPosition).toBeNull()
+  })
+})
+
+describe('LocationService motion restart', () => {
+  it('starts step + compass tracking again after motion access was denied', async () => {
+    const source = new MockMotionSource()
+    source.failWith = new Error('Motion permission denied')
+    const service = new LocationService({ providers: [new BleProvider(new MockBleScanner())], motion: new PdrProvider(source) })
+    const states: string[] = []
+    service.onStatus((s) => { if (s.provider === 'pdr') states.push(s.state) })
+    await service.start(spnVenue)
+    expect(states.at(-1)).toBe('permission-denied')
+
+    source.failWith = null // the user allowed it
+    await service.restartMotion()
+    expect(states.at(-1)).toBe('running')
+    await service.stop()
+    await service.restartMotion() // stopped: nothing to restart
+    expect(states.at(-1)).toBe('idle')
   })
 })

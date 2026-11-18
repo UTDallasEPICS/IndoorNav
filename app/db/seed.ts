@@ -1,9 +1,20 @@
 import { and, count, eq } from 'drizzle-orm'
 import type { SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy'
-import { importBeaconSurvey, isSurveyImported, removeStaleSurveys, type SurveyFloorMeta } from './beacons'
+import { importBeaconSurvey, isSurveyImported, removeStaleSurveys, type AmbiguityResolutions, type SurveyFloorMeta } from './beacons'
 import * as schema from './schema'
 
 const { buildings, floors, rooms } = schema
+
+/** A bundled bSLAM survey export */
+interface SurveyConfig {
+  name: string
+  csv_path: string
+  floor_path: string
+  /** Replaces the export's georeference (every SPN1 export so far has it wrong) */
+  geo: SurveyFloorMeta['geo']
+  /** Ambiguous beacons whose right solution is known */
+  resolutions?: AmbiguityResolutions
+}
 
 // Bundled map data per floor of SPN1 (from scripts/cad-to-svg.py)
 // `surveys`: bSLAM beacon surveys, oldest first: a later survey's data replaces an earlier one's.
@@ -27,7 +38,7 @@ export const SPN1_LEVEL1 = {
       // the survey's geo-referencing is fixed in bSLAM and it's re-exported.
       geo: { origin_latitude: 32.99454196, origin_longitude: -96.75271754, x_axis_bearing_deg: 180.08 },
     },
-  ],
+  ] as SurveyConfig[],
 }
 
 export const SPN1_LEVEL2 = {
@@ -40,15 +51,24 @@ export const SPN1_LEVEL2 = {
   rooms_path: '/maps/spn-level2-rooms.json',
   surveys: [
     {
-      name: 'spn-level2-20261030-2057',
-      csv_path: '/data/surveys/spn-level2-beacons-20261030-2057.csv',
-      floor_path: '/data/surveys/spn-level2-floor-20261030-2057.json',
+      // The 2026-10-30 survey plus a 2026-11-17 east wing session (same bSLAM project and frame), after OIT turned
+      // vBLE off on 7 APs there and gave each a static Eddystone-UID beacon (instance = the AP's MAC, d4dc09...).
+      // Each static beacon was surveyed within 0.6-4 m of the silent vBLE AP it replaces; those 7 vBLE IDs stay in
+      // the list but are no longer heard.
+      name: 'spn-level2-20261117-1828',
+      csv_path: '/data/surveys/spn-level2-beacons-20261117-1828.csv',
+      floor_path: '/data/surveys/spn-level2-floor-20261117-1828.json',
       // Same wrong georeference as level 1, and the export's scale (28.47 px/m) is ~4% off. Fitted by registering
       // the level 2 floorplan image onto level 1's (walls, columns, cores: scale 1.0138, 0.3 px after rotation) and
       // reusing level 1's override above; `scale` turns the export's meters into real ones.
       geo: { origin_latitude: 32.99455647, origin_longitude: -96.75273094, x_axis_bearing_deg: 180.08, scale: 0.9598 },
+      resolutions: {
+        // Static beacon of the AP whose vBLE was 4102c*e00000 (2.229): its primary solution is 4 m from that AP's
+        // surveyed position, the alternate 10 m
+        d4dc092b89a2: 'primary',
+      },
     },
-  ],
+  ] as SurveyConfig[],
 }
 
 export const SPN1_FLOORS = [SPN1_LEVEL1, SPN1_LEVEL2]
@@ -103,6 +123,6 @@ async function seedFloor(db: SqliteRemoteDatabase<typeof schema>, buildingId: nu
       fetchOk(survey.csv_path).then(r => r.text()),
       fetchOk(survey.floor_path).then(r => r.json() as Promise<SurveyFloorMeta>),
     ])
-    await importBeaconSurvey(db, { floorId: floor!.id, name: survey.name, csv, floor: { ...floorMeta, geo: survey.geo ?? floorMeta.geo } })
+    await importBeaconSurvey(db, { floorId: floor!.id, name: survey.name, csv, floor: { ...floorMeta, geo: survey.geo ?? floorMeta.geo }, resolutions: survey.resolutions })
   }
 }

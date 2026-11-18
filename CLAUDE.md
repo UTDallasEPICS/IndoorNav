@@ -94,6 +94,9 @@ pnpm cap:ios             # build, sync, open Xcode
 pnpm cap:android         # build, sync, open Android Studio
 pnpm cap:run:ios         # build and run on a simulator/device (also cap:run:android)
 
+# Location debug log: record sensor inputs + filter decisions to a file on the phone (app/utils/location/README.md)
+NUXT_PUBLIC_LOCATION_DEBUG_LOG=true pnpm cap:run:ios
+
 # Live reload on a phone: serve on LAN, then point the app at it
 pnpm dev --host
 CAP_SERVER_URL=http://<LAN-IP>:3000 pnpm exec cap run ios   # run plain cap:sync before any release build
@@ -157,6 +160,11 @@ Decision drivers to respect:
     (81 APs, 41 good/fair used, scale corrected 4%). Floor height 4.27 m assumed. No level 2 routing grid yet.
     49 AP IDs are in both floors' surveys; each is kept on the floor that hears it strongest, so seeding both
     floors gives 30 usable APs on level 1 and 33 on level 2 (`beacons.test.ts`).
+  - 2026-11-17: OIT turned vBLE off on 7 level 2 east wing APs (2.223 / 2.229 / 2.2 corridor) and enabled static
+    Eddystone-UID beacons on them (instance = AP MAC). Found from a debug-log walk: those APs were never heard.
+    Level 2 seed replaced with the 2026-11-17 export (10-30 data + an east wing session that surveyed the 7 static
+    beacons); `d4dc092b89a2`'s ambiguous position resolved by hand. Both floors seeded: 30 usable APs on level 1,
+    41 on level 2. Not yet verified on a device.
 - [ ] Get written non-objection from OIT for passive BLE reception. *Due Oct 16*
 - [ ] Confirm a Capacitor BLE plugin reads advertisements on current iOS **and** Android devices.
 - [ ] BLE trilateration prototype that outputs coordinates.
@@ -174,6 +182,7 @@ Decision drivers to respect:
     grid). Simulated SPN1 level 1 routes: wall crossings 108 → 22 per walk, 0% of fixes inside walls, mean error
     2.85 → 2.68 m (p90 5.3 → 5.8 m). Not yet verified on a device.
 - [ ] Monitor beacon namespace/instance IDs for changes on OIT's side.
+  - 2026-11-17: first change seen (vBLE off on 7 level 2 APs, static beacons instead). Asked OIT to keep vBLE on.
 - [ ] (Future-proofing) vSLAM locating reaches ≥ 60% of BLE precision in ideal conditions (no people around).
 
 ### Map generation — Bao (R02)

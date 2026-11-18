@@ -144,13 +144,21 @@
       </button>
     </div>
 
-    <!-- Barometer readout for testing floor changes (SHOW_BAROMETER_DEBUG). Remove before release. -->
-    <div v-if="SHOW_BAROMETER_DEBUG" class="baro-debug" aria-hidden="true">
-      <template v-if="barometerReading?.pressureHpa">
-        <div>{{ barometerReading.pressureHpa.toFixed(2) }} hPa · {{ formatHeight(barometerReading.heightM) }} · {{ formatSpeed(barometerReading.verticalSpeedMps) }}</div>
-        <div>Baro floor {{ barometerReading.floorLevel ?? '–' }} · BLE {{ barometerReading.voteLevel ?? '–' }}<template v-if="barometerReading.voteShare != null"> ({{ Math.round(barometerReading.voteShare * 100) }}%)</template></div>
-      </template>
-      <div v-else>Barometer: {{ barometerStatus }}<template v-if="barometerMessage"> – {{ barometerMessage }}</template></div>
+    <!-- Test readouts (top left): barometer (SHOW_BAROMETER_DEBUG) and the location debug log, when a build has it on -->
+    <div v-if="SHOW_BAROMETER_DEBUG || debugLogFile" class="debug-readouts" aria-hidden="true">
+      <!-- Barometer readout for testing floor changes. Remove before release. -->
+      <div v-if="SHOW_BAROMETER_DEBUG" class="debug-readout">
+        <template v-if="barometerReading?.pressureHpa">
+          <div>{{ barometerReading.pressureHpa.toFixed(2) }} hPa · {{ formatHeight(barometerReading.heightM) }} · {{ formatSpeed(barometerReading.verticalSpeedMps) }}</div>
+          <div>Baro floor {{ barometerReading.floorLevel ?? '–' }} · BLE {{ barometerReading.voteLevel ?? '–' }}<template v-if="barometerReading.voteShare != null"> ({{ Math.round(barometerReading.voteShare * 100) }}%)</template></div>
+        </template>
+        <div v-else>Barometer: {{ barometerStatus }}<template v-if="barometerMessage"> – {{ barometerMessage }}</template></div>
+      </div>
+      <!-- Location debug log (NUXT_PUBLIC_LOCATION_DEBUG_LOG): shows it's recording, and to which file -->
+      <div v-if="debugLogFile" class="debug-readout">
+        <div><span class="rec-dot" />Logging location</div>
+        <div class="debug-file">{{ debugLogFile.split('/').pop() }}</div>
+      </div>
     </div>
 
     <!-- Bottom sheet: searches the destination, or sets your location by hand -->
@@ -217,6 +225,16 @@
           <template v-else-if="locationFix">Starting from your current location.</template>
           <template v-else>Finding your location… or set it with the 📍 button.</template>
         </p>
+        <!-- Live location without steps + compass: the dot still works but jumps around, so say why and how to fix it -->
+        <p v-if="!manualLocation && motionStatus === 'permission-denied'" class="sheet-hint motion-warning" role="status">
+          <template v-if="motionRetryFailed">
+            Motion access is still off. Close and reopen the app, then tap Allow when asked.
+          </template>
+          <template v-else>
+            Motion access is off, so your dot may jump around.
+            <button class="link-button" type="button" @click="retryMotion">Allow motion</button>
+          </template>
+        </p>
 
         <form class="destination-form" @submit.prevent="findRoute"> <!-- .prevent stops the browser reloading the page on submit -->
           <input
@@ -265,7 +283,7 @@ import { loadRouteGrid } from '~/utils/route-between'
 import { snapToRoute } from '~/utils/snap-to-route'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
-const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo, barometerStatus, barometerMessage, barometerReading } = useNavigation()
+const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo, barometerStatus, barometerMessage, barometerReading, debugLogFile, motionStatus, motionRetryFailed, retryMotion } = useNavigation()
 
 // Barometer readout (top left) for testing floor changes on a phone: pressure, height above level 1, vertical
 // speed, and the barometer's floor next to the BLE vote's. Set to false (or delete the readout) before release.
@@ -1176,11 +1194,18 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   cursor: default;
 }
 
-.baro-debug {
+.debug-readouts {
   position: absolute;
   top: max(16px, env(safe-area-inset-top));
   left: 16px;
   max-width: calc(100% - 140px); /* clear of the floor switcher */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none; /* never blocks map drags */
+}
+
+.debug-readout {
   padding: 6px 10px;
   border: 1px solid var(--color-border);
   border-radius: 10px;
@@ -1191,6 +1216,21 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
   pointer-events: none; /* never blocks map drags */
+}
+
+.rec-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--color-error);
+  vertical-align: 0;
+}
+
+.debug-file {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
 }
 
 .map-controls {
@@ -1284,6 +1324,11 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   margin: 6px 0 16px;
   color: var(--color-text-muted);
   font-size: 14px;
+}
+
+.motion-warning {
+  margin-top: -10px; /* sits right under the hint above it */
+  color: var(--color-text);
 }
 
 .link-button {

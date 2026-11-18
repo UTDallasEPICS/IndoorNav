@@ -64,6 +64,12 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
   (`41021*e40000`). `indexVenue(...).resolveBeaconId` maps every scanned beam onto that row, so an AP's beams feed
   one RSSI filter and count once in trilateration. Don't import an ungrouped export: each beam would be placed as
   its own beacon a few meters from the AP.
+- **Static beacons:** an AP can also (or instead) send one fixed Eddystone-UID, configured in Mist. OIT's use the
+  same namespace with the AP's MAC as the instance (`d4dc092b8664`). They're surveyed and used like any other
+  beacon. On 2026-11-17 OIT turned vBLE off on 7 level 2 east wing APs and gave each a static beacon; the old vBLE
+  IDs stay in the data but are no longer heard. Ask OIT to keep vBLE on, and re-survey whenever APs are reconfigured.
+- **Ambiguous beacons** (the survey found two mirror-image positions) aren't used, unless `seed.ts` resolves them:
+  `resolutions: { <instance>: 'primary' | 'alternate' }` on the survey stores that solution as `manual`.
 - Each beacon's `txPower` / `pathLossExponent` are the survey's fitted values. Its mounting height is
   `floorZ + phoneHeightM + height_offset_m`, the beacon-to-phone height the survey's fit assumed.
 - **Adding a survey:** copy the export's `*_beacons_*.csv` and `*_floor_*.json` into `public/data/surveys/` as
@@ -73,7 +79,7 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
   below; an AP in surveys of different floors stays on the floor whose survey heard it strongest (max RSSI). To replace a survey, swap it out of `surveys`: on next launch
   the seed deletes surveys no longer listed and the beacons they last set (`removeStaleSurveys`).
 - **Check the export's georeference** before adding it. The level 1 exports (2026-10-21 through 2026-10-30) have it wrong (image-right
-  set to east; it's south), so `seed.ts` overrides it with `geo`, fitted from room labels matched between the
+  set to east; it's south), and so do the level 2 exports through 2026-11-17, so `seed.ts` overrides it with `geo`, fitted from room labels matched between the
   survey's floorplan image and the map SVG. Level 2's export also has a ~4% scale error, corrected with
   `geo.scale`. `beacons.test.ts` fails if surveyed beacons fall off the map.
 
@@ -128,8 +134,9 @@ CapacitorMotionSource ─ accel + compass ─► PdrProvider                  �
 - Per beacon: `txPower` (RSSI at 1 m) and `pathLossExponent` come from the survey fit (see **Beacon data**).
   Re-survey to recalibrate; beacons without a fit use `DEFAULT_BEACON_REGISTRY_OPTIONS`.
 - `FusionEngine` options: Kalman `accelerationNoise`, indoor/outdoor `switchAfterMs`, `gpsGoodAccuracyM`,
-  `maxDeadReckoningMs` (5 s: how long steps/compass alone keep moving the dot after the last BLE fix; after that
-  nothing is emitted, so the map's 10 s stale check can clear the dot).
+  `maxDeadReckoningMs` (15 s: how long positions from steps/compass alone are shown after the last BLE fix; after
+  that nothing is emitted, so the map's 10 s stale check can clear the dot, but the filter keeps following steps so
+  the next fix doesn't make the dot jump) and `restartAfterGapMs` (30 s: after a longer gap, restart from BLE).
 - `StepKalman` (`fusion/stepKalman.ts`): `stationaryMeasurementScale` and `stationaryNoise` (how hard the dot holds
   still while you stand), `movingNoise`, `gateChi2` / `relocalizeAfter` (outlier rejection).
 - `PdrProvider` options: step `thresholdMs2` / `weinbergK`, `headingSmoothingMs`, `defaultHeadingAccuracyDeg`.
@@ -201,6 +208,13 @@ instead of `StepKalman`. Same inputs, same error model; it just also knows the w
   are nudged apart by 0.3 m (`resampleJitterM`), or walls shrink the cloud until it ignores BLE.
 - `FusionOptions.stepFilterKind` forces `'kalman'` or `'particle'`. Floors without a grid (and outdoors) use
   StepKalman.
+- **Open-plan rooms are cleared** (`fusion/openAreas.ts`). The level 2 grid draws desks and cubicles as walls, which
+  chopped the cloud up: on a recorded level 2 walk (2026-11-17, replayed from its debug log) the dot jumped over 1 m
+  51 times and its mean landed in a wall 156 times. `useNavigation` clears the inside of every room named in
+  `OPEN_AREA_NAMES` (default `OPEN OFFICE`) using its CAD `outline`, keeping a 3-cell band along the outline (the
+  room's walls); corridors and other rooms keep every wall. Same walk: 31 jumps, 62 wall snaps. Routing still uses
+  the full grid. Level 2 open offices 2.120 and 2.203 have no outline in the rooms JSON, so they keep their
+  furniture until the CAD pipeline finds their outlines.
 
 Simulator, 4 A* routes on SPN1 level 1 with the surveyed APs (`sim/spnWalk.ts`), 8 seeds, after the first 15 s:
 
@@ -265,6 +279,38 @@ The simulator uses the same path-loss model as the estimator (plus a small expon
 wall losses, and Gaussian noise), so it's **optimistic**. Real walls, bodies and multipath make things worse.
 Use it to catch regressions and compare settings, not to predict real accuracy. That needs walking tests
 in SPN1 (see the CSV/checkpoint success criterion in CLAUDE.md).
+
+## Debug log (recording a walk on a phone)
+
+To see why the dot misbehaves on a real walk, build with the debug log on. The app then records every sensor input
+and filter decision to a JSON-lines file **on the phone** (it's never uploaded; C02):
+
+```bash
+NUXT_PUBLIC_LOCATION_DEBUG_LOG=true pnpm cap:run:ios      # or cap:run:android / cap:ios
+```
+
+The flag is baked in when the web bundle is built (`runtimeConfig.public.locationDebugLog` in `nuxt.config.ts`),
+so run plain `pnpm cap:sync` again before any build you hand to other people. While it records, the map shows
+"Logging location" and the file name at the top left. A new file starts each time location starts.
+
+What's in it (one JSON object per line, `{ at, kind, ... }`; full list in `debug/debugLog.ts`):
+
+- **Inputs, as the filters got them:** `fix` (BLE position, accuracy, error ellipse), `step` (length, heading,
+  heading accuracy), `motion` (moving, heading), `baro`, plus `ble.readings` (per-AP RSSI and floor vote each BLE
+  fix came from). Enough to replay a walk into the filters on a desktop.
+- **Decisions:** `fusion.*` (seeding, dropping the step filter), `pf.step` (heading stretch, cloud spread, wall
+  crossings, resampling), `pf.update` / `kf.update` (gate distance, gated or not), `pf.relocalize`, `pf.snap`
+  (dot moved off a wall).
+- **Output:** `out`, the position the map was given and which filter made it (`particle`, `kalman`, or `cv`).
+
+Getting the file off the phone (`location-logs/location-<time>.jsonl`):
+
+- **iOS:** Xcode → Window → Devices and Simulators → the app → ⋯ → Download Container, then
+  `AppData/Documents/location-logs/`. Or:
+  `xcrun devicectl device copy from --device <id> --domain-type appDataContainer --domain-identifier edu.utdallas.epics.indoornav --source Documents/location-logs --destination ./location-logs`
+- **Android:** `adb pull /sdcard/Android/data/edu.utdallas.epics.indoornav/files/location-logs`
+
+Logs hold your walk's positions: don't commit them or share them outside the team.
 
 ## Known limits / things to verify
 
