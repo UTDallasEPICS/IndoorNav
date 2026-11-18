@@ -64,6 +64,12 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
   (`41021*e40000`). `indexVenue(...).resolveBeaconId` maps every scanned beam onto that row, so an AP's beams feed
   one RSSI filter and count once in trilateration. Don't import an ungrouped export: each beam would be placed as
   its own beacon a few meters from the AP.
+- **Static beacons:** an AP can also (or instead) send one fixed Eddystone-UID, configured in Mist. OIT's use the
+  same namespace with the AP's MAC as the instance (`d4dc092b8664`). They're surveyed and used like any other
+  beacon. On 2026-11-17 OIT turned vBLE off on 7 level 2 east wing APs and gave each a static beacon; the old vBLE
+  IDs stay in the data but are no longer heard. Ask OIT to keep vBLE on, and re-survey whenever APs are reconfigured.
+- **Ambiguous beacons** (the survey found two mirror-image positions) aren't used, unless `seed.ts` resolves them:
+  `resolutions: { <instance>: 'primary' | 'alternate' }` on the survey stores that solution as `manual`.
 - Each beacon's `txPower` / `pathLossExponent` are the survey's fitted values. Its mounting height is
   `floorZ + phoneHeightM + height_offset_m`, the beacon-to-phone height the survey's fit assumed.
 - **Adding a survey:** copy the export's `*_beacons_*.csv` and `*_floor_*.json` into `public/data/surveys/` as
@@ -73,7 +79,7 @@ stored as **WGS84 lat/lon**, never in a survey's local frame. They come from bSL
   below; an AP in surveys of different floors stays on the floor whose survey heard it strongest (max RSSI). To replace a survey, swap it out of `surveys`: on next launch
   the seed deletes surveys no longer listed and the beacons they last set (`removeStaleSurveys`).
 - **Check the export's georeference** before adding it. The level 1 exports (2026-10-21 through 2026-10-30) have it wrong (image-right
-  set to east; it's south), so `seed.ts` overrides it with `geo`, fitted from room labels matched between the
+  set to east; it's south), and so do the level 2 exports through 2026-11-17, so `seed.ts` overrides it with `geo`, fitted from room labels matched between the
   survey's floorplan image and the map SVG. Level 2's export also has a ~4% scale error, corrected with
   `geo.scale`. `beacons.test.ts` fails if surveyed beacons fall off the map.
 

@@ -168,10 +168,10 @@ describe('importBeaconSurvey (in SQLite)', () => {
 
   it('keeps an AP heard from both floors on the floor that hears it strongest, in either import order', async () => {
     const L2 = 'public/data/surveys/spn-level2'
-    const csv2 = readFileSync(`${L2}-beacons-20261030-2057.csv`, 'utf8')
-    const floor2: SurveyFloorMeta = { ...JSON.parse(readFileSync(`${L2}-floor-20261030-2057.json`, 'utf8')), geo: SPN1_LEVEL2.surveys[0]!.geo }
+    const csv2 = readFileSync(`${L2}-beacons-20261117-1828.csv`, 'utf8')
+    const floor2: SurveyFloorMeta = { ...JSON.parse(readFileSync(`${L2}-floor-20261117-1828.json`, 'utf8')), geo: SPN1_LEVEL2.surveys[0]!.geo }
     const level1 = { floorId: 1, name: 's1', csv, floor }
-    const level2 = { floorId: 2, name: 's2', csv: csv2, floor: floor2 }
+    const level2 = { floorId: 2, name: 's2', csv: csv2, floor: floor2, resolutions: SPN1_LEVEL2.surveys[0]!.resolutions }
     const seedBoth = async (order: typeof level1[]) => {
       const db = await openDb()
       await db.insert(schema.floors).values({ building_id: 1, level: 2, svg_path: '', grid_path: '' })
@@ -184,17 +184,17 @@ describe('importBeaconSurvey (in SQLite)', () => {
     expect((await seedBoth([level2, level1])).map(key).sort()).toEqual(stored.map(key).sort())
 
     const registry = toBeaconRegistry(stored, spnVenue)
-    expect(stored).toHaveLength(103) // 71 + 81 - 49 APs in both surveys
-    // 37 and 41 seeded alone: an AP in both surveys now counts only on its stronger floor, with that survey's fit
+    expect(stored).toHaveLength(109) // 71 + 91 - 53 APs in both surveys
+    // 37 and 52 seeded alone: an AP in both surveys now counts only on its stronger floor, with that survey's fit
     expect(registry.filter((b) => b.floorId === 'spn1-l1')).toHaveLength(30)
-    expect(registry.filter((b) => b.floorId === 'spn1-l2')).toHaveLength(33)
+    expect(registry.filter((b) => b.floorId === 'spn1-l2')).toHaveLength(41) // 33 before the static beacons
   })
 })
 
-describe('SPN1 level 2 survey (2026-10-30, vBLE beams grouped)', () => {
+describe('SPN1 level 2 survey (2026-10-30 + 2026-11-17 static beacons, vBLE beams grouped)', () => {
   const L2 = 'public/data/surveys/spn-level2'
-  const csv2 = readFileSync(`${L2}-beacons-20261030-2057.csv`, 'utf8')
-  const exported2: SurveyFloorMeta = JSON.parse(readFileSync(`${L2}-floor-20261030-2057.json`, 'utf8'))
+  const csv2 = readFileSync(`${L2}-beacons-20261117-1828.csv`, 'utf8')
+  const exported2: SurveyFloorMeta = JSON.parse(readFileSync(`${L2}-floor-20261117-1828.json`, 'utf8'))
   const floor2: SurveyFloorMeta = { ...exported2, geo: SPN1_LEVEL2.surveys[0]!.geo }
   const { beacons } = parseBeaconSurvey(csv2, floor2)
   const registry = toBeaconRegistry(beacons.map((b) => ({
@@ -211,9 +211,30 @@ describe('SPN1 level 2 survey (2026-10-30, vBLE beams grouped)', () => {
   })), spnVenue)
 
   it('keeps the trusted APs on level 2', () => {
-    expect(beacons).toHaveLength(81)
-    expect(registry).toHaveLength(41) // 6 good + 35 fair APs
+    expect(beacons).toHaveLength(91)
+    expect(registry).toHaveLength(51) // 14 good + 37 fair APs
     expect(registry.every((b) => b.floorId === 'spn1-l2')).toBe(true)
+  })
+
+  it('has the static beacon of each AP whose vBLE was turned off, the ambiguous one resolved by hand', () => {
+    const resolved = parseBeaconSurvey(csv2, floor2, SPN1_LEVEL2.surveys[0]!.resolutions).beacons
+    const statics = resolved.filter((b) => b.instance.startsWith('d4dc09'))
+    expect(statics.map((b) => b.instance).sort()).toEqual(['d4dc092b8664', 'd4dc092b899d', 'd4dc092b89a2', 'd4dc092b8a83', 'd4dc092b8aab', 'd4dc092b8aba', 'd4dc092b8b2d'])
+    const b89a2 = statics.find((b) => b.instance === 'd4dc092b89a2')!
+    const original = beacons.find((b) => b.instance === 'd4dc092b89a2')!
+    expect(original.status).toBe('ambiguous')
+    expect(b89a2).toMatchObject({ status: 'manual', latitude: original.latitude, longitude: original.longitude })
+    expect(b89a2.notes).toContain('primary solution chosen by hand')
+  })
+
+  it('can take an ambiguous beacon\'s alternate solution instead', () => {
+    const original = beacons.find((b) => b.instance === 'd4dc092b89a2')!
+    const swapped = parseBeaconSurvey(csv2, floor2, { d4dc092b89a2: 'alternate' }).beacons.find((b) => b.instance === 'd4dc092b89a2')!
+    expect(swapped).toMatchObject({
+      status: 'manual',
+      latitude: original.alternate_latitude, longitude: original.alternate_longitude,
+      alternate_latitude: original.latitude, alternate_longitude: original.longitude
+    })
   })
 
   it('places the beacons on the SPN1 level 2 map', () => {
