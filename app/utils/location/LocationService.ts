@@ -52,6 +52,7 @@ export class LocationService {
   private fusionOptions: Partial<FusionOptions>
   private debug: DebugLog
   private fusion: FusionEngine | null = null
+  private venue: VenueConfig | null = null
   private fixes = new Emitter<LocationFix>()
   private positions = new Emitter<MapPosition>()
   private events = new Emitter<LocationEvent>()
@@ -123,6 +124,7 @@ export class LocationService {
       barometer: this.barometer !== null
     })
     const fusion = new FusionEngine(venue, this.fusionOptions, debug)
+    this.venue = venue
     const index = indexVenue(venue)
     this.fusion = fusion
     this.cleanup.push(
@@ -201,8 +203,19 @@ export class LocationService {
     for (const off of this.cleanup) off()
     this.cleanup = []
     this.fusion = null
+    this.venue = null
     this.latestFix = null
     this.latestPosition = null
+  }
+
+  /**
+   * Starts the step + compass tracking again, e.g. after the user allowed motion access they had denied. Call
+   * `requestMotionPermission()` inside the tap first, so iOS can show its prompt. A no-op while stopped.
+   */
+  async restartMotion() {
+    if (!this.motion || !this.venue) return
+    await this.motion.stop()
+    await this.motion.start(this.venue)
   }
 
   private allProviders(): Array<{ start(venue: VenueConfig): Promise<void>, stop(): Promise<void> }> {

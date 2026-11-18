@@ -44,6 +44,9 @@ const locationLost = ref(false)
 const barometerStatus = ref<ProviderStatus['state']>('idle')
 const barometerMessage = ref('')
 const barometerReading = ref<BarometerReading | null>(null)
+// Step + compass tracking: without it the dot is BLE alone and jumps around more
+const motionStatus = ref<ProviderStatus['state']>('idle')
+const motionRetryFailed = ref(false) // "Allow motion" was tapped and iOS still said no
 // Location debug log (NUXT_PUBLIC_LOCATION_DEBUG_LOG): the file this run writes to, or null when off
 const debugLogFile = ref<string | null>(null)
 let debugLog: FileDebugLog | null = null
@@ -76,6 +79,11 @@ export function useNavigation() {
     const created = createDeviceLocationService({ gps: false, ...(debugLog && { debugLog: debugLog.log }) })
     service = created
     created.onStatus(status => {
+      if (status.provider === 'pdr') {
+        motionStatus.value = status.state
+        if (status.state === 'running') motionRetryFailed.value = false
+        return
+      }
       if (status.provider === 'barometer') {
         barometerStatus.value = status.state
         barometerMessage.value = status.message ?? ''
@@ -139,6 +147,8 @@ export function useNavigation() {
     barometerStatus.value = 'idle'
     barometerMessage.value = ''
     barometerReading.value = null
+    motionStatus.value = 'idle'
+    motionRetryFailed.value = false
     await stopping.stop()
     if (debugLog) {
       const closing = debugLog
@@ -146,6 +156,18 @@ export function useNavigation() {
       debugLogFile.value = null
       await closing.log.close()
     }
+  }
+
+  /** Asks for motion access again and restarts step + compass tracking. Call it from a tap (iOS prompts only then). */
+  async function retryMotion() {
+    const asked = requestMotionPermission() // before any await, so it's still inside the tap
+    if (!service) return
+    const granted = await asked
+    if (!granted) {
+      motionRetryFailed.value = true
+      return
+    }
+    await service.restartMotion()
   }
 
   function canRoute(start: MapPoint, destination: MapPoint) {
@@ -167,6 +189,9 @@ export function useNavigation() {
     barometerMessage: readonly(barometerMessage),
     barometerReading: readonly(barometerReading), // pressure, height, barometer floor vs BLE vote; null before the first sample
     debugLogFile: readonly(debugLogFile), // file the location debug log is writing to, or null when it's off
+    motionStatus: readonly(motionStatus), // step + compass tracking: 'running', 'permission-denied', 'unavailable', ...
+    motionRetryFailed: readonly(motionRetryFailed), // retryMotion() was refused again: relaunching the app is the way out
+    retryMotion,
     startLocation,
     stopLocation,
     canRoute,

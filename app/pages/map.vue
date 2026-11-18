@@ -225,6 +225,16 @@
           <template v-else-if="locationFix">Starting from your current location.</template>
           <template v-else>Finding your location… or set it with the 📍 button.</template>
         </p>
+        <!-- Live location without steps + compass: the dot still works but jumps around, so say why and how to fix it -->
+        <p v-if="!manualLocation && motionStatus === 'permission-denied'" class="sheet-hint motion-warning" role="status">
+          <template v-if="motionRetryFailed">
+            Motion access is still off. Close and reopen the app, then tap Allow when asked.
+          </template>
+          <template v-else>
+            Motion access is off, so your dot may jump around.
+            <button class="link-button" type="button" @click="retryMotion">Allow motion</button>
+          </template>
+        </p>
 
         <form class="destination-form" @submit.prevent="findRoute"> <!-- .prevent stops the browser reloading the page on submit -->
           <input
@@ -273,7 +283,7 @@ import { loadRouteGrid } from '~/utils/route-between'
 import { snapToRoute } from '~/utils/snap-to-route'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
-const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo, barometerStatus, barometerMessage, barometerReading, debugLogFile } = useNavigation()
+const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo, barometerStatus, barometerMessage, barometerReading, debugLogFile, motionStatus, motionRetryFailed, retryMotion } = useNavigation()
 
 // Barometer readout (top left) for testing floor changes on a phone: pressure, height above level 1, vertical
 // speed, and the barometer's floor next to the BLE vote's. Set to false (or delete the readout) before release.
@@ -1314,6 +1324,11 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   margin: 6px 0 16px;
   color: var(--color-text-muted);
   font-size: 14px;
+}
+
+.motion-warning {
+  margin-top: -10px; /* sits right under the hint above it */
+  color: var(--color-text);
 }
 
 .link-button {
