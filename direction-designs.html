@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction UI Concepts</title>
+<style>
+:root {
+  --bg: #f1f1f4; /* page around the phones */
+  --fg: #1c1c1e;
+  --muted: #6e6e76;
+  --line: #d7d7de;
+  --card: #ffffff;
+  --primary: #bfe05b; /* app's --color-primary */
+  --on-primary: #1c1c1e; /* app's --color-on-primary */
+  --primary-soft: color-mix(in srgb, var(--primary) 35%, transparent);
+  --app-muted: #8e8e93;
+  --app-border: #d1d1d6;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.12); /* app's --shadow-floating */
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font); -webkit-font-smoothing: antialiased; }
+header { max-width: 1240px; margin: 0 auto; padding: 40px 16px 8px; }
+h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -0.02em; }
+header p { margin: 0 0 6px; color: var(--muted); max-width: 760px; line-height: 1.5; }
+.scenario { display: inline-flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.scenario span { background: #e6e6ec; border-radius: 999px; padding: 4px 10px; font-size: 13px; color: #3a3a40; }
+
+.grid { max-width: 1240px; margin: 0 auto; padding: 24px 16px 64px; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 36px 24px; }
+figure { margin: 0; display: flex; flex-direction: column; align-items: center; }
+figcaption { width: 100%; max-width: 280px; margin-top: 14px; }
+figcaption b { display: block; font-size: 15px; margin-bottom: 4px; }
+figcaption b i { font-style: normal; color: var(--muted); font-weight: 500; margin-right: 6px; }
+figcaption p { margin: 0 0 6px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+figcaption .tag { font-size: 12px; color: #4a5a1a; background: color-mix(in srgb, var(--primary) 40%, white); border-radius: 6px; padding: 2px 7px; display: inline-block; }
+
+/* Phone frame: 280 × 560 screen inside a dark bezel */
+.phone { position: relative; width: 280px; height: 560px; border-radius: 34px; border: 8px solid #1c1c1e; overflow: hidden; background: #f4f4f6; box-shadow: 0 10px 30px rgba(0,0,0,0.12); }
+.phone > svg.map { position: absolute; inset: 0; width: 100%; height: 100%; }
+.notch { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); width: 80px; height: 20px; background: #1c1c1e; border-radius: 12px; z-index: 20; }
+
+/* Pieces reused by many designs */
+.ic { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.float-btn { position: absolute; width: 38px; height: 38px; border-radius: 50%; background: #fff; box-shadow: var(--shadow); display: grid; place-items: center; font-size: 15px; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; border-radius: 20px 20px 0 0; box-shadow: 0 -2px 12px rgba(0,0,0,0.08); padding: 10px 16px 18px; }
+.grabber { width: 36px; height: 4px; border-radius: 2px; background: var(--app-border); margin: 0 auto 10px; }
+.muted { color: var(--app-muted); }
+.end-btn { border: 0; border-radius: 12px; padding: 10px 14px; font-weight: 600; background: #f0f0f3; color: var(--fg); font-size: 14px; }
+.primary-btn { border: 0; border-radius: 12px; padding: 12px; font-weight: 600; background: var(--primary); color: var(--on-primary); font-size: 15px; width: 100%; }
+
+/* 1 — Top banner */
+.d1 .banner { position: absolute; top: 34px; left: 10px; right: 10px; background: var(--fg); color: #fff; border-radius: 16px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; box-shadow: var(--shadow); }
+.d1 .banner .ic { font-size: 40px; color: var(--primary); }
+.d1 .dist { font-size: 24px; font-weight: 700; line-height: 1; }
+.d1 .what { font-size: 14px; opacity: 0.85; margin-top: 3px; }
+.d1 .then { position: absolute; top: 106px; left: 10px; background: #3a3a3e; color: #fff; border-radius: 0 0 12px 12px; padding: 5px 10px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.d1 .then .ic { font-size: 15px; }
+
+/* 2 — Inside the existing bottom sheet */
+.d2 .row { display: flex; align-items: center; gap: 12px; }
+.d2 .arrow-tile { width: 56px; height: 56px; border-radius: 14px; background: var(--primary); color: var(--on-primary); display: grid; place-items: center; font-size: 34px; }
+.d2 .big { font-size: 20px; font-weight: 700; }
+.d2 .progress { height: 6px; background: #ececf0; border-radius: 3px; margin: 14px 0 10px; overflow: hidden; }
+.d2 .progress div { width: 62%; height: 100%; background: var(--primary); }
+.d2 .foot { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+
+/* 3 — Full-width lime header */
+.d3 .header { position: absolute; top: 0; left: 0; right: 0; background: var(--primary); color: var(--on-primary); padding: 38px 16px 16px; display: flex; align-items: center; gap: 14px; }
+.d3 .header .ic { font-size: 54px; stroke-width: 2.8; }
+.d3 .header .dist { font-size: 34px; font-weight: 800; line-height: 1; letter-spacing: -0.02em; }
+.d3 .header .what { font-size: 15px; font-weight: 600; margin-top: 2px; }
+.d3 .strip { position: absolute; left: 12px; right: 12px; bottom: 14px; background: #fff; border-radius: 14px; box-shadow: var(--shadow); display: flex; justify-content: space-between; padding: 12px 16px; font-size: 14px; }
+.d3 .strip b { font-size: 17px; }
+
+/* 4 — Pill riding above the arrow */
+.d4 .pill { position: absolute; left: 150px; top: 378px; transform: translate(-50%, -100%); background: var(--fg); color: #fff; padding: 7px 12px 7px 9px; border-radius: 999px; display: flex; gap: 6px; align-items: center; font-size: 14px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow); }
+.d4 .pill .ic { font-size: 20px; color: var(--primary); }
+.d4 .pill::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; background: var(--fg); transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
+
+/* 5 — Numbered turn markers on the line */
+.d5 .hint { position: absolute; top: 36px; left: 50%; transform: translateX(-50%); background: #fff; border-radius: 999px; box-shadow: var(--shadow); padding: 8px 14px; font-size: 14px; font-weight: 600; white-space: nowrap; display: flex; gap: 8px; align-items: center; }
+.d5 .num { width: 22px; height: 22px; border-radius: 50%; background: var(--fg); color: var(--primary); display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+
+/* 6 — Step list */
+.d6 .sheet { padding-bottom: 12px; }
+.d6 h4 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; }
+.d6 ol { list-style: none; margin: 0; padding: 0; position: relative; }
+.d6 ol::before { content: ''; position: absolute; left: 15px; top: 14px; bottom: 14px; width: 2px; background: #e4e4ea; }
+.d6 li { display: flex; gap: 10px; align-items: center; padding: 6px 0; font-size: 14px; position: relative; }
+.d6 li .dot { width: 32px; height: 32px; border-radius: 50%; background: #f0f0f3; display: grid; place-items: center; font-size: 18px; color: #555; }
+.d6 li.now .dot { background: var(--primary); color: var(--on-primary); }
+.d6 li.done { opacity: 0.4; }
+.d6 li .d { margin-left: auto; font-size: 12px; color: var(--app-muted); }
+.d6 li.now b { font-weight: 700; }
+
+/* 7 — Swipeable step cards */
+.d7 .cards { position: absolute; left: 0; right: 0; bottom: 16px; display: flex; gap: 10px; padding-left: 20px; }
+.d7 .card { flex: none; width: 210px; background: #fff; border-radius: 16px; box-shadow: var(--shadow); padding: 14px; }
+.d7 .card.next { opacity: 0.85; transform: scale(0.94); transform-origin: left center; }
+.d7 .card .top { display: flex; align-items: center; gap: 10px; }
+.d7 .card .ic { font-size: 30px; }
+.d7 .card.cur .ic { color: #5c7d10; }
+.d7 .card .t { font-size: 17px; font-weight: 700; }
+.d7 .card .s { font-size: 12px; color: var(--app-muted); margin-top: 8px; }
+.d7 .dots { position: absolute; bottom: 4px; left: 0; right: 0; display: flex; gap: 5px; justify-content: center; }
+.d7 .dots i { width: 6px; height: 6px; border-radius: 50%; background: #c7c7cc; }
+.d7 .dots i.on { background: var(--fg); width: 16px; border-radius: 3px; }
+
+/* 8 — Giant arrow, walking mode */
+.d8 .veil { position: absolute; inset: 0; background: rgba(255,255,255,0.78); backdrop-filter: blur(2px); }
+.d8 .focus { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.d8 .focus .ic { font-size: 150px; stroke-width: 2.2; color: var(--fg); }
+.d8 .focus .dist { font-size: 52px; font-weight: 800; letter-spacing: -0.03em; margin-top: 4px; }
+.d8 .focus .what { font-size: 18px; font-weight: 600; }
+.d8 .focus .sub { font-size: 13px; color: var(--app-muted); margin-top: 6px; }
+.d8 .mapbtn { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--fg); color: #fff; border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 600; }
+
+/* 9 — Countdown ring */
+.d9 .ringbox { position: absolute; top: 36px; right: 12px; width: 108px; background: #fff; border-radius: 20px; box-shadow: var(--shadow); padding: 12px 10px 10px; text-align: center; }
+.d9 .ring { position: relative; width: 76px; height: 76px; margin: 0 auto; }
+.d9 .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.d9 .ring .ic { position: absolute; inset: 0; margin: auto; font-size: 34px; }
+.d9 .ringbox b { display: block; font-size: 18px; margin-top: 6px; }
+.d9 .ringbox span { font-size: 12px; color: var(--app-muted); }
+
+/* 10 — Banner + "then" bubble + ETA */
+.d10 .banner { position: absolute; top: 34px; left: 10px; right: 10px; background: #fff; border-radius: 16px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; box-shadow: var(--shadow); border-left: 6px solid var(--primary); }
+.d10 .banner .ic { font-size: 36px; }
+.d10 .dist { font-size: 22px; font-weight: 700; line-height: 1; }
+.d10 .what { font-size: 14px; color: #444; margin-top: 3px; }
+.d10 .then { position: absolute; top: 112px; right: 14px; background: var(--fg); color: #fff; border-radius: 12px; padding: 6px 10px; font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.d10 .then .ic { font-size: 16px; color: var(--primary); }
+.d10 .eta { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; padding: 12px 16px 18px; border-radius: 20px 20px 0 0; display: flex; align-items: center; gap: 12px; box-shadow: 0 -2px 12px rgba(0,0,0,0.08); }
+.d10 .eta .t { font-size: 20px; font-weight: 700; color: #5c7d10; }
+.d10 .eta .m { font-size: 13px; color: var(--app-muted); }
+.d10 .eta .end-btn { margin-left: auto; background: #fde8e8; color: #c23a3e; }
+
+/* 11 — Heading-relative pointer */
+.d11 .compass-note { position: absolute; top: 36px; left: 12px; right: 12px; background: #fff; border-radius: 14px; box-shadow: var(--shadow); padding: 10px 12px; font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.d11 .compass-note .ic { font-size: 26px; color: #5c7d10; }
+.d11 .compass-note b { font-size: 15px; display: block; }
+
+/* 12 — Landmark wording */
+.d12 .sheet { padding-bottom: 16px; }
+.d12 .row { display: flex; gap: 12px; align-items: flex-start; }
+.d12 .arrow-tile { width: 48px; height: 48px; border-radius: 12px; background: var(--fg); color: var(--primary); display: grid; place-items: center; font-size: 28px; flex: none; }
+.d12 .sentence { font-size: 17px; font-weight: 600; line-height: 1.3; }
+.d12 .chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 1px 7px; font-size: 15px; font-weight: 700; }
+.d12 .chip i { width: 9px; height: 9px; border-radius: 2px; }
+.d12 .meta { font-size: 12px; color: var(--app-muted); margin-top: 6px; }
+
+@media (max-width: 340px) { .phone { transform: scale(0.92); } }
+</style>
+</head>
+<body>
+
+<!-- Shared drawings: a simplified floor plan, the route, the user arrow, and the turn icons -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="plan" viewBox="0 0 280 560"> <!-- stand-in floor plan, not SPN's real layout -->
+      <rect width="280" height="560" fill="#f4f4f6"/>
+      <g fill="#fff" stroke="#b9b9c1" stroke-width="1.5">
+        <rect x="20" y="60" width="100" height="120"/><rect x="20" y="200" width="100" height="100"/>
+        <rect x="20" y="370" width="100" height="160"/><rect x="160" y="60" width="38" height="110"/>
+        <rect x="236" y="60" width="44" height="110"/><rect x="160" y="210" width="120" height="70"/>
+        <rect x="160" y="350" width="120" height="180"/>
+      </g>
+      <rect x="20" y="200" width="100" height="100" fill="#f2b53a" fill-opacity="0.22" stroke="#f2b53a" stroke-width="1.5"/> <!-- a legend-coloured room (Lobby) -->
+      <g fill="#9a9aa2" font-family="system-ui" font-size="9" text-anchor="middle">
+        <text x="70" y="124">1.205</text><text x="70" y="254">LOBBY</text><text x="70" y="454">1.110</text>
+        <text x="220" y="249">1.300</text><text x="220" y="444">1.120</text><text x="179" y="118">1.4</text><text x="258" y="118">1.402</text>
+      </g>
+    </symbol>
+    <symbol id="route" viewBox="0 0 280 560"> <!-- start at the arrow, right turn, left turn, arrive -->
+      <polyline points="140,470 140,315 217,315 217,130" fill="none" stroke="#1c1c1e" stroke-opacity="0.25" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
+      <polyline points="140,470 140,315 217,315 217,130" fill="none" stroke="#bfe05b" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="217" cy="122" r="7" fill="#1c1c1e"/><circle cx="217" cy="122" r="3" fill="#bfe05b"/>
+    </symbol>
+    <symbol id="me" viewBox="-20 -20 40 40"> <!-- user's arrow, same look as the app's marker -->
+      <circle r="18" fill="#bfe05b" fill-opacity="0.35"/>
+      <path d="M0 -11 L8 9 L0 4 L-8 9 Z" fill="#bfe05b" stroke="#1c1c1e" stroke-width="2" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M7 21V12a4 4 0 0 1 4-4h8"/><path d="M15 4l4 4-4 4"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M17 21V12a4 4 0 0 0-4-4H5"/><path d="M9 4L5 8l4 4"/></symbol>
+    <symbol id="i-straight" viewBox="0 0 24 24"><path d="M12 21V4"/><path d="M6 10l6-6 6 6"/></symbol>
+    <symbol id="i-arrive" viewBox="0 0 24 24"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><circle cx="12" cy="10" r="2"/></symbol>
+  </defs>
+</svg>
+
+<header>
+  <h1>Direction UI: 12 concepts</h1>
+  <p>Ways the map page could tell the walker what to do next, instead of only drawing the lime route. All 12 show the same moment with the same stand-in floor plan, and they use the app's colours (lime <code>#bfe05b</code> on near-black), white floating cards and system font.</p>
+  <div class="scenario"><span>Walking north</span><span>Next: turn right in 12 m</span><span>Then: turn left</span><span>Arrive at 1.402</span><span>~1 min left</span></div>
+</header>
+
+<main class="grid">
+
+  <!-- 1 -->
+  <figure>
+    <div class="phone d1">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="415" width="30" height="30"/></svg>
+      <div class="banner">
+        <svg class="ic"><use href="#i-right"/></svg>
+        <div><div class="dist">12 m</div><div class="what">Turn right</div></div>
+      </div>
+      <div class="then">Then <svg class="ic"><use href="#i-left"/></svg> left</div>
+    </div>
+    <figcaption><b><i>01</i>Top banner</b><p>Dark card pinned to the top, like car navigation: distance first, then the action. A small "then" tab underneath previews the next turn.</p><span class="tag">Familiar · glanceable</span></figcaption>
+  </figure>
+
+  <!-- 2 -->
+  <figure>
+    <div class="phone d2">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="350" width="30" height="30"/></svg>
+      <div class="float-btn" style="top:36px;left:12px">≡</div>
+      <div class="sheet">
+        <div class="grabber"></div>
+        <div class="row">
+          <div class="arrow-tile"><svg class="ic"><use href="#i-right"/></svg></div>
+          <div><div class="big">Turn right in 12 m</div><div class="muted" style="font-size:13px">toward Room 1.300</div></div>
+        </div>
+        <div class="progress"><div></div></div>
+        <div class="foot"><span class="muted">48 m · 1 min to 1.402</span><button class="end-btn">End</button></div>
+      </div>
+    </div>
+    <figcaption><b><i>02</i>In the bottom sheet</b><p>Reuses the sheet that already holds "Find Route". After you search, the form turns into the current step plus a progress bar, so the map stays clear and the layout barely changes.</p><span class="tag">Least new UI</span></figcaption>
+  </figure>
+
+  <!-- 3 -->
+  <figure>
+    <div class="phone d3">
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="415" width="30" height="30"/></svg>
+      <div class="header">
+        <svg class="ic"><use href="#i-right"/></svg>
+        <div><div class="dist">12 m</div><div class="what">Turn right</div></div>
+      </div>
+      <div class="strip"><span><b>1 min</b> <span class="muted">· 48 m</span></span><span class="muted">to 1.402</span></div>
+    </div>
+    <figcaption><b><i>03</i>Lime header bar</b><p>Edge-to-edge brand-coloured bar with huge type. It's the boldest option and readable at arm's length while walking. The ETA moves to a slim strip at the bottom.</p><span class="tag">Max readability</span></figcaption>
+  </figure>
+
+  <!-- 4 -->
+  <figure>
+    <div class="phone d4">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="385" width="30" height="30"/></svg>
+      <div class="pill"><svg class="ic"><use href="#i-right"/></svg>Right in 12 m</div>
+      <div class="float-btn" style="top:36px;left:12px">≡</div>
+      <div class="float-btn" style="bottom:20px;right:14px;font-weight:700;font-size:13px">✕</div>
+    </div>
+    <figcaption><b><i>04</i>Pill above the arrow</b><p>A speech-bubble pill that follows your arrow, so the instruction is right where you're already looking. There are no cards, which leaves the most map visible.</p><span class="tag">Minimal · map-first</span></figcaption>
+  </figure>
+
+  <!-- 5 -->
+  <figure>
+    <div class="phone d5">
+      <div class="notch"></div>
+      <svg class="map">
+        <use href="#plan"/><use href="#route"/><use href="#me" x="125" y="415" width="30" height="30"/>
+        <g font-family="system-ui" font-size="11" font-weight="700" text-anchor="middle"> <!-- numbered turn badges sitting on the corners -->
+          <circle cx="140" cy="315" r="12" fill="#1c1c1e"/><text x="140" y="319" fill="#bfe05b">1</text>
+          <circle cx="217" cy="315" r="12" fill="#fff" stroke="#1c1c1e" stroke-width="2"/><text x="217" y="319" fill="#1c1c1e">2</text>
+        </g>
+      </svg>
+      <div class="hint"><span class="num">1</span><svg class="ic" style="font-size:18px"><use href="#i-right"/></svg>Right in 12 m</div>
+    </div>
+    <figcaption><b><i>05</i>Numbered turns on the line</b><p>Each turn the detector finds gets a numbered badge on the route, and the top hint names the next number. You see the whole plan at once, and turns already passed fade out.</p><span class="tag">Shows the whole route</span></figcaption>
+  </figure>
+
+  <!-- 6 -->
+  <figure>
+    <div class="phone d6">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="370" width="30" height="30"/></svg>
+      <div class="sheet">
+        <div class="grabber"></div>
+        <h4>Directions to 1.402 <span class="muted" style="font-weight:500">1 min</span></h4>
+        <ol>
+          <li class="done"><span class="dot"><svg class="ic"><use href="#i-straight"/></svg></span>Head north<span class="d">done</span></li>
+          <li class="now"><span class="dot"><svg class="ic"><use href="#i-right"/></svg></span><b>Turn right</b><span class="d">12 m</span></li>
+          <li><span class="dot"><svg class="ic"><use href="#i-left"/></svg></span>Turn left<span class="d">22 m</span></li>
+          <li><span class="dot"><svg class="ic"><use href="#i-arrive"/></svg></span>Arrive at 1.402<span class="d">14 m</span></li>
+        </ol>
+      </div>
+    </div>
+    <figcaption><b><i>06</i>Step list (timeline)</b><p>Every step in the sheet with the current one highlighted lime and the finished ones faded. It's good for previewing before you start walking, and it could collapse to just the current row.</p><span class="tag">Overview · accessible</span></figcaption>
+  </figure>
+
+  <!-- 7 -->
+  <figure>
+    <div class="phone d7">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="400" width="30" height="30"/></svg>
+      <div class="cards">
+        <div class="card cur"><div class="top"><svg class="ic"><use href="#i-right"/></svg><div class="t">Turn right</div></div><div class="s">in 12 m · step 2 of 4</div></div>
+        <div class="card next"><div class="top"><svg class="ic"><use href="#i-left"/></svg><div class="t">Turn left</div></div><div class="s">in 34 m · step 3 of 4</div></div>
+      </div>
+      <div class="dots"><i></i><i class="on"></i><i></i><i></i></div>
+    </div>
+    <figcaption><b><i>07</i>Swipeable step cards</b><p>One card per step along the bottom. It auto-advances as you walk, and you can swipe ahead to peek (the map would glide to that turn). The next card peeks in from the right.</p><span class="tag">Explorable</span></figcaption>
+  </figure>
+
+  <!-- 8 -->
+  <figure>
+    <div class="phone d8">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="415" width="30" height="30"/></svg>
+      <div class="veil"></div>
+      <div class="focus">
+        <svg class="ic"><use href="#i-right"/></svg>
+        <div class="dist">12 m</div>
+        <div class="what">Turn right</div>
+        <div class="sub">then left · 1 min to 1.402</div>
+      </div>
+      <div class="mapbtn">Show map</div>
+    </div>
+    <figcaption><b><i>08</i>Walking mode, giant arrow</b><p>The map fades back and one huge arrow plus the distance takes over. It's built for glancing down mid-stride, with "Show map" to toggle back. It could switch on automatically when you're moving.</p><span class="tag">Glance-while-walking</span></figcaption>
+  </figure>
+
+  <!-- 9 -->
+  <figure>
+    <div class="phone d9">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="415" width="30" height="30"/></svg>
+      <div class="ringbox">
+        <div class="ring">
+          <svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.5" fill="none" stroke="#ececf0" stroke-width="3"/><circle cx="18" cy="18" r="15.5" fill="none" stroke="#bfe05b" stroke-width="3" stroke-linecap="round" stroke-dasharray="97.4" stroke-dashoffset="32"/></svg>
+          <svg class="ic"><use href="#i-right"/></svg>
+        </div>
+        <b>12 m</b><span>Turn right</span>
+      </div>
+      <div class="float-btn" style="top:36px;left:12px">≡</div>
+    </div>
+    <figcaption><b><i>09</i>Countdown ring</b><p>A compact corner widget where the lime ring fills up as you approach the turn, so you can feel the turn coming without reading the number.</p><span class="tag">Compact · ambient</span></figcaption>
+  </figure>
+
+  <!-- 10 -->
+  <figure>
+    <div class="phone d10">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="415" width="30" height="30"/></svg>
+      <div class="banner">
+        <svg class="ic"><use href="#i-right"/></svg>
+        <div><div class="dist">12 m</div><div class="what">Turn right toward 1.300</div></div>
+      </div>
+      <div class="then">Then <svg class="ic"><use href="#i-left"/></svg> in 22 m</div>
+      <div class="eta">
+        <div><div class="t">1 min</div><div class="m">48 m · arrive 2:14 PM</div></div>
+        <button class="end-btn">End</button>
+      </div>
+    </div>
+    <figcaption><b><i>10</i>Banner + ETA bar</b><p>A light version of #1 with a lime accent edge, a floating "then" chip, and a bottom bar with time left, arrival time and a red End button. It's the most complete and "app-like" option.</p><span class="tag">Full-featured</span></figcaption>
+  </figure>
+
+  <!-- 11 -->
+  <figure>
+    <div class="phone d11">
+      <div class="notch"></div>
+      <svg class="map">
+        <use href="#plan"/><use href="#route"/><use href="#me" x="125" y="300" width="30" height="30"/>
+        <g transform="translate(140 315)"> <!-- sweeping arc from your heading to the new direction -->
+          <path d="M0 -38 A38 38 0 0 1 38 0" fill="none" stroke="#1c1c1e" stroke-width="3" stroke-dasharray="4 4"/>
+          <path d="M33 -8 L38 0 L44 -7" fill="none" stroke="#1c1c1e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <text x="46" y="-24" font-family="system-ui" font-size="12" font-weight="700" fill="#1c1c1e">90°</text>
+        </g>
+      </svg>
+      <div class="compass-note"><svg class="ic"><use href="#i-right"/></svg><div><b>Turn right now</b><span class="muted">Face the dashed arrow, then walk</span></div></div>
+    </div>
+    <figcaption><b><i>11</i>Turn arc at the corner</b><p>When you reach a turn, a dashed arc sweeps from where you face to where you should go. The angle comes straight from the turn detector, and it's handy at wide lobbies where "right" is ambiguous.</p><span class="tag">Precise at corners</span></figcaption>
+  </figure>
+
+  <!-- 12 -->
+  <figure>
+    <div class="phone d12">
+      <div class="notch"></div>
+      <svg class="map"><use href="#plan"/><use href="#route"/><use href="#me" x="125" y="395" width="30" height="30"/></svg>
+      <div class="float-btn" style="top:36px;left:12px">≡</div>
+      <div class="sheet">
+        <div class="grabber"></div>
+        <div class="row">
+          <div class="arrow-tile"><svg class="ic"><use href="#i-right"/></svg></div>
+          <div>
+            <div class="sentence">Turn right after the <span class="chip" style="background:#f2b53a33;color:#8a5d00"><i style="background:#f2b53a"></i>Lobby</span></div>
+            <div class="meta">in 12 m · then left at Room 1.300</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption><b><i>12</i>Landmark wording</b><p>Describes turns by the rooms you pass, using the legend's names and colours (<code>spn-legend.json</code>), so the chip matches the coloured room on the map. People navigate indoors by landmarks more than by metres.</p><span class="tag">Human-friendly · uses legend</span></figcaption>
+  </figure>
+
+</main>
+</body>
+</html>

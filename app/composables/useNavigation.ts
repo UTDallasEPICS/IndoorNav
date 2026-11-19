@@ -120,7 +120,7 @@ export function useNavigation() {
     return start.floor === destination.floor && ROUTABLE_FLOORS.includes(start.floor)
   }
 
-  /** Route as map positions, start to destination. Throws an Error with a message to show the user. */
+  /** Route start to destination: { points } as map positions and { turns } along them. Throws an Error with a message to show the user. */
   async function routeTo(start: MapPoint, destination: MapPoint) {
     if (!canRoute(start, destination)) throw new Error("Routes between floors aren't available yet.")
     return routeBetween(start, destination, start.floor)

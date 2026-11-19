@@ -188,6 +188,20 @@
       </button>
     </div>
 
+    <!-- Turn-by-turn banner while a route is showing: the next step, and a chip with the one after it -->
+    <div v-if="directionsNow" ref="directionBar" class="direction-bar">
+      <div class="direction-card">
+        <DirectionIcon :type="directionsNow.next.type" class="direction-card-icon" /> <!-- components/DirectionIcon.vue -->
+        <div>
+          <div class="direction-distance">{{ directionDistance }}</div>
+          <div class="direction-text">{{ directionText }}</div>
+        </div>
+      </div>
+      <div v-if="directionsNow.then" class="direction-then">
+        Then <DirectionIcon :type="directionsNow.then.type" class="direction-then-icon" /> in {{ formatMeters(directionsNow.thenAfterM) }}
+      </div>
+    </div>
+
     <!-- Barometer readout for testing floor changes (SHOW_BAROMETER_DEBUG). Remove before release. -->
     <div v-if="SHOW_BAROMETER_DEBUG" class="baro-debug" aria-hidden="true">
       <template v-if="barometerReading?.pressureHpa">
@@ -246,6 +260,17 @@
         <button class="primary-button" type="button" :disabled="!ready" @click="confirmLocation">
           Confirm Location
         </button>
+      </template>
+
+      <template v-else-if="route"> <!-- navigating: where you're going, and End -->
+        <div class="trip">
+          <DirectionIcon type="arrive" class="trip-icon" />
+          <div class="trip-text">
+            <div class="trip-label">Going to<template v-if="route.room.floor !== 1"> · Level {{ route.room.floor }}</template></div>
+            <div class="trip-destination">{{ route.room.label }}</div>
+          </div>
+          <button class="end-button" type="button" @click="endNavigation">End</button>
+        </div>
       </template>
 
       <template v-else> <!-- destination search -->
@@ -311,6 +336,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { loadRouteGrid } from '~/utils/route-between'
 import { resolveLegend, legendRows } from '~/utils/legend'
 import { snapToRoute } from '~/utils/snap-to-route'
+import { buildDirections, progressAlong, directionsAt } from '~/utils/directions'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
 const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo, barometerStatus, barometerMessage, barometerReading } = useNavigation()
@@ -325,12 +351,14 @@ const mapContainer = ref(null) // ref(): a value the page reacts to; read/write 
 const mapImage = ref(null) // the <img> floor plan
 const sheet = ref(null) // the bottom sheet <section>
 const legendOpen = ref(false) // legend panel showing (Legend button, top left)
+const directionBar = ref(null) // the turn-by-turn banner at the top while a route is showing
 
 const error = ref('') // shown on screen whenever it isn't empty
 
 // Natural size of the SVG, read once it has loaded
 const imageWidth = ref(0)
 const imageHeight = ref(0)
+const heightPerWidth = ref({}) // { [floor]: height / width } of each floor plan seen so far; directions need the route floor's, not the one on screen
 
 // scale = rendered size / natural size
 const scale = ref(1)
@@ -417,6 +445,7 @@ function onImageLoad() { // the <img> finished loading (first load, or after a f
   imageWidth.value = mapImage.value.naturalWidth
   imageHeight.value = mapImage.value.naturalHeight
   mapFloor.value = floor.value
+  heightPerWidth.value = { ...heightPerWidth.value, [floor.value]: imageHeight.value / imageWidth.value }
 
   if (floorSwitch) {
     finishFloorSwitch()
@@ -782,7 +811,7 @@ function onPointerUp(event) { // finger or mouse lifted: also detects double-tap
 const destination = ref('') // the search box text (v-model in the template)
 const destinationError = ref('')
 const selectedRoom = ref(null) // the room the pin is shown on (null = no pin)
-const route = ref(null) // { points: [{ x, y }, ...], floor } in map fractions, start to destination; null = no line
+const route = ref(null) // { points: [{ x, y }, ...], turns, floor, room } in map fractions, start to destination; null = no line
 const routeLoading = ref(false) // true while the route is being found (disables the button)
 const ROUTE_PADDING = 40 // px kept around the route when zooming to fit it
 
@@ -876,9 +905,9 @@ async function findRoute() { // "Find Route" button: find the room, work out the
 
   routeLoading.value = true
   try {
-    const points = await routeTo(start, room) // A* runs right here on the phone
+    const { points, turns } = await routeTo(start, room) // A* runs right here on the phone, then finds the turns
     if (step.value !== 'destination') return // the 📍 button was tapped while waiting
-    route.value = { points, floor: room.floor } // setting this draws the line (on the room's floor)
+    route.value = { points, turns, floor: room.floor, room } // setting this draws the line (on the room's floor) and starts the directions
   } catch (err) {
     console.error(err)
     destinationError.value = err.message || 'Something went wrong finding the route.'
@@ -898,7 +927,8 @@ function routeView(points) { // centre and zoom that fit the whole route above t
   const ys = points.map(p => p.y)
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
   const { clientWidth, clientHeight } = mapContainer.value
-  const visibleHeight = clientHeight - sheet.value.offsetHeight
+  const topCovered = directionBar.value ? directionBar.value.offsetTop + directionBar.value.offsetHeight : 0 // top buttons plus the directions banner under them
+  const visibleHeight = clientHeight - sheet.value.offsetHeight - 2 * topCovered // the view centres above the sheet, so twice what's covered keeps the route's top clear
 
   const fitScale = Math.min(
     (clientWidth - 2 * ROUTE_PADDING) / (Math.max(maxX - minX, 1e-6) * imageWidth.value), // 1e-6 avoids dividing by 0 for a straight line
@@ -909,6 +939,45 @@ function routeView(points) { // centre and zoom that fit the whole route above t
     y: (minY + maxY) / 2,
     scale: Math.min(maxScale.value, Math.max(minScale.value, fitScale)) // stay inside the zoom limits
   }
+}
+
+// ---- Turn-by-turn directions ----
+
+// Steps for the current route (utils/directions.ts): each turn and the arrival, with metres from the start
+const directions = computed(() => {
+  const ratio = route.value && heightPerWidth.value[route.value.floor]
+  return ratio ? buildDirections(route.value.points, route.value.turns, ratio, WIDTH_PER_METER) : null
+})
+
+// What to do next, from where you are on the route. A location on another floor (or none) counts as the start.
+const directionsNow = computed(() => {
+  if (!directions.value) return null
+  const ratio = heightPerWidth.value[route.value.floor]
+  const here = userLocation.value
+  const snap = here?.floor === route.value.floor ? snapToRoute(here, route.value.points, ratio) : null // nearest spot on the line
+  const progressM = snap ? progressAlong(directions.value, route.value.points, snap, ratio, WIDTH_PER_METER) : 0
+  return directionsAt(directions.value, progressM)
+})
+
+const NOW_M = 3 // closer than this, say "now" instead of a distance (BLE is only good to a few metres)
+const formatMeters = m => `${Math.round(m)} m`
+const STEP_TEXT = { left: 'Turn left', right: 'Turn right', arrive: 'Arrive' }
+
+const directionDistance = computed(() => { // big text in the banner
+  const now = directionsNow.value
+  if (now.next.type === 'arrive' && now.toNextM < NOW_M) return 'You\'ve arrived'
+  return now.toNextM < NOW_M ? 'Now' : formatMeters(now.toNextM)
+})
+const directionText = computed(() => { // line under it
+  const { next } = directionsNow.value
+  if (next.type === 'arrive') return `at ${route.value.room.label}`
+  return STEP_TEXT[next.type]
+})
+
+function endNavigation() { // "End" button: drop the route and go back to searching
+  clearRoute()
+  destination.value = ''
+  goToMyLocation()
 }
 
 // ---- Lifecycle ----
@@ -1375,6 +1444,122 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
   border-radius: 50%;
   background: var(--color-location-soft); /* see-through, so the rooms show under it */
   pointer-events: none; /* drags go to the map */
+}
+
+/* ---------------- DIRECTIONS BANNER ---------------- */
+
+.direction-bar {
+  position: absolute;
+  top: calc(max(16px, env(safe-area-inset-top)) + 46px + 10px); /* under the Legend button and floor switcher (46px tall) */
+  left: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end; /* the "then" chip sits under the banner's right end */
+  gap: 8px;
+  pointer-events: none; /* map drags pass through the gaps */
+}
+
+.direction-card {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-left: 6px solid var(--color-primary); /* lime edge, like design 10 */
+  border-radius: 16px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+  pointer-events: auto;
+}
+
+.direction-card-icon {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  color: var(--color-text);
+}
+
+.direction-distance {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.direction-text {
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 15px;
+}
+
+.direction-then {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-floating);
+  pointer-events: auto;
+}
+
+.direction-then-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--color-text); /* lime is too faint on white */
+}
+
+/* Bottom sheet while navigating: destination and End */
+.trip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.trip-icon {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  color: var(--color-text);
+}
+
+.trip-text {
+  flex: 1;
+  min-width: 0; /* lets a long room name truncate instead of pushing End off screen */
+}
+
+.trip-label {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.trip-destination {
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.end-button {
+  flex: none;
+  height: 44px;
+  padding: 0 22px;
+  border: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-error) 14%, var(--color-surface));
+  color: var(--color-error);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.end-button:active {
+  filter: brightness(0.94);
 }
 
 /* ---------------- BOTTOM SHEET ---------------- */

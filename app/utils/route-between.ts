@@ -3,6 +3,7 @@
 import { cellToMap, mapToCell } from '#shared/grid-map'
 import { parseGrid, findPath, type Grid } from './astar'
 import { nearestOpenCell } from './nearest-open-cell'
+import { detectTurns, type Turn } from './turn-detection'
 
 type MapPoint = { x: number, y: number } // fractions (0–1) of the floor plan, like the rooms' x/y
 
@@ -25,8 +26,9 @@ export function loadRouteGrid(floor: number): Promise<Grid> {
   return load
 }
 
-/** Route from start to destination (both on `floor`) as map positions. Throws an Error with a message to show the user. */
-export async function routeBetween(start: MapPoint, destination: MapPoint, floor: number): Promise<MapPoint[]> {
+/** Route from start to destination (both on `floor`): map positions, and the turns along them (turn.index points into
+ *  `points`). Throws an Error with a message to show the user. */
+export async function routeBetween(start: MapPoint, destination: MapPoint, floor: number): Promise<{ points: MapPoint[], turns: Turn[] }> {
   const grid = await loadRouteGrid(floor).catch(() => { throw new Error('Failed to load the route grid.') })
   const startCell = nearestOpenCell(grid, mapToCell(start, floor) as [number, number]) // map position -> grid cell, nudged onto open floor
   const goalCell = nearestOpenCell(grid, mapToCell(destination, floor) as [number, number])
@@ -34,5 +36,8 @@ export async function routeBetween(start: MapPoint, destination: MapPoint, floor
 
   const path = findPath(grid, startCell, goalCell) // [[row, col], ...] from start to destination, or null
   if (!path) throw new Error('No path exists between the start and destination.')
-  return path.map(cell => cellToMap(cell, floor)) // each cell -> { x, y } on that floor's map
+  return {
+    points: path.map(cell => cellToMap(cell, floor)), // each cell -> { x, y } on that floor's map
+    turns: detectTurns(path) // on the grid cells, like scripts/turn_detection.py; one point per cell, so the indexes match
+  }
 }
