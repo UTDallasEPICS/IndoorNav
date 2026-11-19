@@ -34,7 +34,7 @@ export function parseGrid(text: string): Grid {
 
 // Hallway centering
 const CLEARANCE_RADIUS = 6 // cells; ~half of an 11-wide hallway
-const WALL_WEIGHT = 2      // extra cost per step right next to a wall (0 disables centering)
+const WALL_WEIGHT = 1.5      // extra cost per step right next to a wall (0 disables centering)
 
 // Heuristic inflation: 1 = shortest paths; higher searches faster for slightly longer routes
 const H_WEIGHT = 1.5

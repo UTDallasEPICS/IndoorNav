@@ -1,7 +1,7 @@
 [
  {"number": "1.1", "name": "LOBBY", "label": "Lobby", "color": "#f2b53a", "type": "area", "legend": true},
  {"number": "1.101", "name": "RECEPTION", "label": "Reception", "color": "#e0609a", "type": "area", "legend": true},
- {"number": "1.2", "name": "UT DESIGN", "label": "UTD Design Studio", "color": "#2b4a8b", "type": "area", "legend": true},
+ {"number": "1.2", "name": "UT DESIGN", "label": "Design Studio", "color": "#2b4a8b", "type": "area", "legend": true},
  {"number": "1.103", "name": "UT DESIGN", "label": "UTD Design", "color": "#b07a4f", "type": "area", "legend": true},
 
  {"number": "1.1R1", "name": "WOMEN", "label": "Restrooms", "color": "#4f8fd6", "type": "area", "legend": true},

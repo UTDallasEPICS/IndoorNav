@@ -10,3 +10,6 @@ project(':capacitor-community-sqlite').projectDir = new File('../node_modules/@c
 
 include ':capacitor-geolocation'
 project(':capacitor-geolocation').projectDir = new File('../node_modules/@capacitor/geolocation/android')
+
+include ':capgo-capacitor-barometer'
+project(':capgo-capacitor-barometer').projectDir = new File('../node_modules/@capgo/capacitor-barometer/android')

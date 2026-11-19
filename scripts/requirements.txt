@@ -5,3 +5,4 @@ scipy        # navigation.py: fast wall-distance map (optional: a slower pure-Py
 matplotlib   # navigation.py --plot only
 Pillow       # fit-grid-bounds.py
 ezdxf        # cad-to-svg.py
+shapely      # cad-to-svg.py: joins wall lines into closed shapes for the wall fill

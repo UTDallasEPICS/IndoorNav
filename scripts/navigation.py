@@ -41,7 +41,7 @@ CUT_CORNERS = False
 
 # Hallway centering
 CLEARANCE_RADIUS = 6     # cells; ~half of an 11-wide hallway
-WALL_WEIGHT = 2.0        # penalty strength next to a wall (0 disables centering)
+WALL_WEIGHT = 1.5        # penalty strength next to a wall (0 disables centering)
 
 # Heuristic inflation. 1.0 = optimal paths. Values like 1.2-2.0 search much
 # faster (fewer expansions) at the cost of slightly suboptimal paths.

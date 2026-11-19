@@ -61,7 +61,7 @@ export interface MapPosition {
   timestamp: number
 }
 
-export type ProviderId = 'ble' | 'gps' | 'pdr'
+export type ProviderId = 'ble' | 'gps' | 'pdr' | 'barometer'
 
 /** One step from pedestrian dead reckoning: a relative move, not a position. */
 export interface PdrStep {
