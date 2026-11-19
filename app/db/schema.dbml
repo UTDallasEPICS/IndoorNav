@@ -1,0 +1,93 @@
+// Mirror of app/db/schema.ts for dbdiagram.io — update both together
+// All x/y are fractions (0–1) of the floor SVG, from the top-left.
+// Beacons are the exception: they are stored in WGS84 lat/lon.
+
+Table buildings {
+  id integer [pk, increment]
+  name text [not null, unique]
+}
+
+Table floors {
+  id integer [pk, increment]
+  building_id integer [not null, ref: > buildings.id]
+  level integer [not null]
+  svg_path text [not null]
+  grid_path text [not null]
+  meters_per_cell real [note: 'unknown until grid scale confirmed']
+  elevation_m real [note: 'height above the ground floor (m), for the barometer; null = unknown']
+  indexes { (building_id, level) [unique] }
+}
+
+Table rooms {
+  id integer [pk, increment]
+  floor_id integer [not null, ref: > floors.id]
+  number text [not null]
+  name text
+  x real [not null]
+  y real [not null]
+  entrance_x real
+  entrance_y real
+  indexes { (floor_id, number) }
+}
+
+Table connectors {
+  id integer [pk, increment]
+  floor_id integer [not null, ref: > floors.id]
+  group_id text [not null, note: 'same stairwell/shaft across floors']
+  type text [not null, note: 'stairs | elevator']
+  x real [not null]
+  y real [not null]
+  indexes { group_id }
+  Note: 'Placeholder: vertical routing is an open question'
+}
+
+Table beacon_surveys {
+  id integer [pk, increment]
+  floor_id integer [not null, ref: > floors.id]
+  name text [not null, unique, note: 'e.g. spn-level1-20261021-1103']
+  project_id text [note: 'bSLAM project UUID']
+  exported_at text [note: 'ISO-8601']
+  height_offset_m real [note: 'vertical beacon-to-phone distance the path-loss fit assumed']
+  imported_at integer [not null, note: 'ms since the Unix epoch']
+}
+
+Table beacons {
+  id integer [pk, increment]
+  floor_id integer [not null, ref: > floors.id]
+  survey_id integer [ref: > beacon_surveys.id, note: 'survey that last set this row']
+  namespace text [not null, note: '10-byte Eddystone namespace, lowercase hex']
+  instance text [not null, note: '6-byte Eddystone instance, lowercase hex']
+  label text [note: "AP name from OIT"]
+
+  status text [not null, note: 'manual | good | fair | ambiguous | poor | insufficient']
+  position_source text [not null, note: 'manual | auto | none']
+  latitude real [note: 'WGS84; null when the survey could not place it']
+  longitude real
+
+  sigma_major_m real [note: '1-sigma error ellipse']
+  sigma_minor_m real
+  ellipse_bearing_deg real [note: 'major axis bearing, 0–180°']
+  radius_95_m real
+  alternate_latitude real [note: 'mirror-image solution when ambiguous']
+  alternate_longitude real
+
+  tx_power_dbm real [note: 'fitted RSSI at 1 m; rssi = tx_power_dbm - 10 * n * log10(d)']
+  path_loss_exponent real [note: 'n']
+  fit_rmse_db real
+  bins integer
+  samples integer
+
+  peak_latitude real [note: 'strongest spot heard, rough fallback location']
+  peak_longitude real
+  peak_rssi_dbm real
+  max_rssi_dbm real
+  advertised_tx_power_dbm real [note: 'from the Eddystone frame, at 0 m']
+
+  first_seen text [note: 'ISO-8601']
+  last_seen text
+  updated_at text
+  notes text
+
+  indexes { (namespace, instance) [unique] }
+  Note: 'Positions are WGS84 lat/lon, not map fractions'
+}

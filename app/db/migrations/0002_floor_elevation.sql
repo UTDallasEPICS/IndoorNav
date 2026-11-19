@@ -1,0 +1,1 @@
+ALTER TABLE `floors` ADD `elevation_m` real;
