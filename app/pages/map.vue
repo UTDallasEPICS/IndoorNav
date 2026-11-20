@@ -99,14 +99,15 @@
       </svg>
 
       <!-- Accuracy circle: you're probably somewhere inside it. Moves and zooms with the map.
-           Only for the live location; a location you set by hand is exact. -->
+           Only for the live location; a location you set by hand is exact. Centred on the arrow
+           (arrowLocation), so while navigating it snaps onto the route line together with the arrow. -->
       <div
-        v-if="ready && step !== 'pick' && !manualLocation && locationFix?.floor === mapFloor"
+        v-if="ready && step !== 'pick' && !manualLocation && arrowLocation?.floor === mapFloor"
         class="accuracy-circle"
         :style="{
           width: `${accuracyRadius * 2}px`,
           height: `${accuracyRadius * 2}px`,
-          transform: `translate(${toScreenX(locationFix.x)}px, ${toScreenY(locationFix.y)}px) translate(-50%, -50%)`
+          transform: `translate(${toScreenX(arrowLocation.x)}px, ${toScreenY(arrowLocation.y)}px) translate(-50%, -50%)`
         }"
       /> <!-- the second translate centres the circle on the point -->
 
@@ -189,16 +190,16 @@
     </div>
 
     <!-- Turn-by-turn banner while a route is showing: the next step, and a chip with the one after it -->
-    <div v-if="directionsNow" ref="directionBar" class="direction-bar">
+    <div v-if="directionView" ref="directionBar" class="direction-bar">
       <div class="direction-card">
-        <DirectionIcon :type="directionsNow.next.type" class="direction-card-icon" /> <!-- components/DirectionIcon.vue -->
+        <DirectionIcon :type="directionView.icon" class="direction-card-icon" /> <!-- components/DirectionIcon.vue -->
         <div>
-          <div class="direction-distance">{{ directionDistance }}</div>
-          <div class="direction-text">{{ directionText }}</div>
+          <div class="direction-action">{{ directionView.action }}</div> <!-- what to do: the big text -->
+          <div class="direction-detail">{{ directionView.detail }}</div> <!-- how far, in steps: small -->
         </div>
       </div>
-      <div v-if="directionsNow.then" class="direction-then">
-        Then <DirectionIcon :type="directionsNow.then.type" class="direction-then-icon" /> in {{ formatMeters(directionsNow.thenAfterM) }}
+      <div v-if="thenView" class="direction-then">
+        Then <DirectionIcon :type="thenView.icon" class="direction-then-icon" /> {{ thenView.text }}
       </div>
     </div>
 
@@ -335,8 +336,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { loadRouteGrid } from '~/utils/route-between'
 import { resolveLegend, legendRows } from '~/utils/legend'
-import { snapToRoute } from '~/utils/snap-to-route'
-import { buildDirections, progressAlong, directionsAt } from '~/utils/directions'
+import { buildDirections, enclosingRoom, locateOnRoute, instructionAt, OFF_ROUTE_M, NOW_M } from '~/utils/directions'
 
 // Core module (composables/useNavigation.ts): live location from the location module, and A* routes on the device
 const { position: locationFix, locationLost, startLocation, stopLocation, canRoute, routeTo, barometerStatus, barometerMessage, barometerReading } = useNavigation()
@@ -423,14 +423,12 @@ const accuracyRadius = computed(() => // circle radius in screen px (metres -> p
   locationFix.value ? locationFix.value.accuracyM * WIDTH_PER_METER * imageWidth.value * scale.value : 0
 )
 
-const OFF_ROUTE_M = 5 // further than this from the route line, the arrow shows where you really are
-
 const arrowLocation = computed(() => { // where the arrow is drawn: on the route line while navigating, else userLocation
   const fix = locationFix.value
-  if (manualLocation.value || !fix || !route.value || route.value.floor !== fix.floor) return userLocation.value // only the live location snaps; a hand-set one is exact
-  const snap = snapToRoute(fix, route.value.points, imageHeight.value / imageWidth.value) // perpendicular onto the nearest part of the line
-  if (!snap || snap.distance / WIDTH_PER_METER > OFF_ROUTE_M) return fix // off route: show the real position
-  return { ...fix, x: snap.x, y: snap.y } // same fix (floor, heading...), moved onto the line
+  const onRoute = routePosition.value // your place on the route (Turn-by-turn directions below), the same one the banner uses
+  if (manualLocation.value || !fix || !onRoute) return userLocation.value // only the live location snaps; a hand-set one is exact
+  if (onRoute.offRouteM > OFF_ROUTE_M) return fix // off route: show the real position
+  return { ...fix, x: onRoute.x, y: onRoute.y } // same fix (floor, heading...), moved onto the line
 })
 
 const ready = computed(() => imageWidth.value > 0 && rooms.value.length > 0) // map image and rooms both loaded
@@ -811,7 +809,7 @@ function onPointerUp(event) { // finger or mouse lifted: also detects double-tap
 const destination = ref('') // the search box text (v-model in the template)
 const destinationError = ref('')
 const selectedRoom = ref(null) // the room the pin is shown on (null = no pin)
-const route = ref(null) // { points: [{ x, y }, ...], turns, floor, room } in map fractions, start to destination; null = no line
+const route = ref(null) // { points: [{ x, y }, ...], turns, floor, room, startRoom } in map fractions, start to destination; null = no line
 const routeLoading = ref(false) // true while the route is being found (disables the button)
 const ROUTE_PADDING = 40 // px kept around the route when zooming to fit it
 
@@ -907,7 +905,8 @@ async function findRoute() { // "Find Route" button: find the room, work out the
   try {
     const { points, turns } = await routeTo(start, room) // A* runs right here on the phone, then finds the turns
     if (step.value !== 'destination') return // the 📍 button was tapped while waiting
-    route.value = { points, turns, floor: room.floor, room } // setting this draws the line (on the room's floor) and starts the directions
+    const startRoom = enclosingRoom(rooms.value.filter(r => r.floor === start.floor), start) // starting inside a room (not a hallway)? then step one is leaving it
+    route.value = { points, turns, floor: room.floor, room, startRoom } // setting this draws the line (on the room's floor) and starts the directions
   } catch (err) {
     console.error(err)
     destinationError.value = err.message || 'Something went wrong finding the route.'
@@ -946,32 +945,60 @@ function routeView(points) { // centre and zoom that fit the whole route above t
 // Steps for the current route (utils/directions.ts): each turn and the arrival, with metres from the start
 const directions = computed(() => {
   const ratio = route.value && heightPerWidth.value[route.value.floor]
-  return ratio ? buildDirections(route.value.points, route.value.turns, ratio, WIDTH_PER_METER) : null
+  return ratio ? buildDirections(route.value.points, route.value.turns, ratio, WIDTH_PER_METER, route.value.startRoom?.outline ?? null) : null
 })
 
-// What to do next, from where you are on the route. A location on another floor (or none) counts as the start.
-const directionsNow = computed(() => {
+// Your place on the route, updated with each location. Each update only looks a little way on from the last one
+// (utils/directions.ts), so where the line passes close to itself you don't jump to the wrong part of it.
+const routePosition = ref(null) // { x, y, progressM, offRouteM }, or null with no route / no location on the route's floor
+watch([userLocation, directions], ([here, steps], [, oldSteps] = []) => { // = []: no old values on the first run
+  if (!steps || here?.floor !== route.value.floor) { routePosition.value = null; return }
+  const previous = steps === oldSteps ? routePosition.value : null // a new route: look along all of it
+  routePosition.value = locateOnRoute(steps, here, previous)
+}, { immediate: true })
+
+// What to tell you now (utils/directions.ts): from your place on the route and the way you're facing. Without a
+// location on the route's floor, from the start of the route.
+const instruction = computed(() => {
   if (!directions.value) return null
-  const ratio = heightPerWidth.value[route.value.floor]
-  const here = userLocation.value
-  const snap = here?.floor === route.value.floor ? snapToRoute(here, route.value.points, ratio) : null // nearest spot on the line
-  const progressM = snap ? progressAlong(directions.value, route.value.points, snap, ratio, WIDTH_PER_METER) : 0
-  return directionsAt(directions.value, progressM)
+  const here = routePosition.value ? userLocation.value : directions.value.points[0]
+  const onRoute = routePosition.value ?? { ...directions.value.points[0], progressM: 0, offRouteM: 0 }
+  return instructionAt(directions.value, here, onRoute, routePosition.value ? userLocation.value.headingDeg ?? null : null) // the heading (live location only) says "turn around"
 })
 
-const NOW_M = 3 // closer than this, say "now" instead of a distance (BLE is only good to a few metres)
-const formatMeters = m => `${Math.round(m)} m`
-const STEP_TEXT = { left: 'Turn left', right: 'Turn right', arrive: 'Arrive' }
+// Distances are shown in steps: easier to picture than metres while walking, but kept small next to the action
+const STEP_LENGTH_M = 0.7 // an average walking step (the PDR's steps are 0.5–0.9 m)
+function formatSteps(m) {
+  const steps = Math.max(1, Math.round(m / STEP_LENGTH_M))
+  const shown = steps > 20 ? Math.round(steps / 5) * 5 : steps // nobody counts past 20: round to 5s
+  return `${shown} ${shown === 1 ? 'step' : 'steps'}`
+}
 
-const directionDistance = computed(() => { // big text in the banner
-  const now = directionsNow.value
-  if (now.next.type === 'arrive' && now.toNextM < NOW_M) return 'You\'ve arrived'
-  return now.toNextM < NOW_M ? 'Now' : formatMeters(now.toNextM)
+const TO_ROUTE_TEXT = { left: 'Turn left to the route', right: 'Turn right to the route', straight: 'Walk to the route' }
+
+const directionView = computed(() => { // the banner: icon, the action (big) and how far (small)
+  const now = instruction.value
+  if (!now) return null
+  const soon = now.distanceM < NOW_M ? 'now' : `in ${formatSteps(now.distanceM)}`
+  switch (now.action) {
+    case 'exit': return { icon: 'exit', action: 'Exit the room', detail: now.distanceM < NOW_M ? 'the door is here' : `door in ${formatSteps(now.distanceM)}` }
+    case 'left': return { icon: 'left', action: 'Turn left', detail: soon }
+    case 'right': return { icon: 'right', action: 'Turn right', detail: soon }
+    case 'around': return { icon: 'around', action: 'Turn around', detail: 'the route is behind you' }
+    case 'arrive': return { icon: 'arrive', action: 'Arrive', detail: soon }
+    case 'arrived': return { icon: 'arrive', action: 'You\'ve arrived', detail: route.value.room.label }
+    default: return { // 'to-route': off the line, so point back to it
+      icon: now.side ?? 'straight',
+      action: TO_ROUTE_TEXT[now.side] ?? 'Back to the route',
+      detail: `${formatSteps(now.distanceM)} away`
+    }
+  }
 })
-const directionText = computed(() => { // line under it
-  const { next } = directionsNow.value
-  if (next.type === 'arrive') return `at ${route.value.room.label}`
-  return STEP_TEXT[next.type]
+
+const thenView = computed(() => { // the chip under the banner: the step after a turn
+  const now = instruction.value
+  if (!now?.then || !['exit', 'left', 'right'].includes(now.action)) return null
+  return { icon: now.then.type, text: now.then.type === 'arrive' ? 'arrive' : `turn ${now.then.type}` }
 })
 
 function endNavigation() { // "End" button: drop the route and go back to searching
@@ -1474,22 +1501,26 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 }
 
 .direction-card-icon {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   flex: none;
+  padding: 10px; /* the arrow sits inside a soft lime circle, like the halo around your location */
+  border-radius: 50%;
+  background: var(--color-primary-soft);
   color: var(--color-text);
+  stroke-width: 2; /* thinner than the component's default, so it doesn't overpower the text */
 }
 
-.direction-distance {
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.1;
+.direction-action {
+  font-size: 20px;
+  font-weight: 600; /* same weight as the Legend button: readable without shouting */
+  line-height: 1.2;
 }
 
-.direction-text {
-  margin-top: 2px;
+.direction-detail {
+  margin-top: 3px;
   color: var(--color-text-muted);
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .direction-then {
@@ -1510,6 +1541,7 @@ onBeforeUnmount(() => { // runs when leaving the page: stop animations and liste
 .direction-then-icon {
   width: 18px;
   height: 18px;
+  stroke-width: 2;
   color: var(--color-text); /* lime is too faint on white */
 }
 
