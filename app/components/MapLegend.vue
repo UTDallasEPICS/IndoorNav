@@ -4,11 +4,22 @@
     <section v-if="open" class="legend-panel" aria-label="Map legend">
       <div class="panel-head">
         <h2>Legend</h2>
+        <label class="show-toggle"> <!-- on/off switch: shows or hides the legend colours on the map -->
+          <span>{{ shown ? 'On' : 'Off' }}</span>
+          <input
+            type="checkbox"
+            role="switch"
+            :checked="shown"
+            aria-label="Show legend on the map"
+            @change="emit('update:shown', $event.target.checked)"
+          > <!-- update:shown = what v-model:shown in map.vue listens for -->
+        </label>
         <button class="close" type="button" aria-label="Close legend" @click="emit('close')">✕</button> <!-- tells map.vue to close it -->
       </div>
 
       <ul
         class="legend-list"
+        :class="{ off: !shown }"
         :style="{ gridTemplateRows: `repeat(${Math.ceil(areaRows.length / 2)}, auto)` }"
       > <!-- areas in two columns filled top to bottom: first half on the left, second half on the right -->
 
@@ -21,6 +32,7 @@
       <ul
         v-if="pointRows.length"
         class="point-grid"
+        :class="{ off: !shown }"
         :style="{ gridTemplateRows: `repeat(${Math.ceil(pointRows.length / 2)}, auto)` }"
       > <!-- points at the end, in two columns filled top to bottom: left column first, then right -->
         <li v-for="row in pointRows" :key="row.label" class="point-item">
@@ -37,9 +49,10 @@ import { computed } from 'vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false }, // map.vue decides when the panel shows
-  rows: { type: Array, default: () => [] } // [{ label, color, type }] from legendRows() in utils/legend.ts
+  rows: { type: Array, default: () => [] }, // [{ label, color, type }] from legendRows() in utils/legend.ts
+  shown: { type: Boolean, default: true } // legend colours drawn on the map (v-model:shown in map.vue)
 })
-const emit = defineEmits(['close']) // the ✕ button asks map.vue to close the panel
+const emit = defineEmits(['close', 'update:shown']) // ✕ asks map.vue to close the panel; the switch turns the colours on/off
 
 const areaRows = computed(() => props.rows.filter(row => row.type === 'area')) // list at the top
 const pointRows = computed(() => props.rows.filter(row => row.type === 'point')) // grid at the end
@@ -87,6 +100,61 @@ const pointRows = computed(() => props.rows.filter(row => row.type === 'point'))
   margin: 0;
   font-size: 20px;
   font-weight: 700;
+}
+
+.show-toggle { /* "On [switch]", pushed right next to the ✕ */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 0 auto;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.show-toggle input { /* a phone-style switch drawn from the checkbox */
+  appearance: none;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--color-border);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.show-toggle input::after { /* the knob */
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.show-toggle input:checked {
+  background: var(--color-primary);
+}
+
+.show-toggle input:checked::after {
+  transform: translateX(18px);
+}
+
+.show-toggle input:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.legend-list.off,
+.point-grid.off { /* list greyed out while the colours are hidden on the map */
+  opacity: 0.4;
+  transition: opacity 0.2s ease;
 }
 
 .close {

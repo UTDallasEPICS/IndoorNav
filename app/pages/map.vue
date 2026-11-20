@@ -33,7 +33,7 @@
       <!-- Legend areas (public/maps/spn-legend.json): rooms filled in their colour. Same size and position as the
            floor plan; viewBox 0–1 so the outlines' fractions are used as-is. Under the destination fill and route. -->
       <svg
-        v-if="ready && legendAreasHere.length"
+        v-if="ready && legendShown && legendAreasHere.length"
         class="legend-areas"
         viewBox="0 0 1 1"
         preserveAspectRatio="none"
@@ -53,7 +53,7 @@
       </svg>
 
       <!-- Legend points: a dot on rooms with type "point" (or no outline). Same size on screen at any zoom. -->
-      <template v-if="ready">
+      <template v-if="ready && legendShown">
         <div
           v-for="point in legendPointsHere"
           :key="`${point.number}-${point.name}`"
@@ -328,7 +328,7 @@
     </section>
 
     <!-- Legend panel slides up over the sheet (components/MapLegend.vue) -->
-    <MapLegend :open="legendOpen" :rows="legendRows(legendEntries)" @close="legendOpen = false" />
+    <MapLegend v-model:shown="legendShown" :open="legendOpen" :rows="legendRows(legendEntries)" @close="legendOpen = false" /> <!-- v-model:shown: the panel's switch turns legendShown on/off -->
   </div>
 </template>
 
@@ -351,6 +351,7 @@ const mapContainer = ref(null) // ref(): a value the page reacts to; read/write 
 const mapImage = ref(null) // the <img> floor plan
 const sheet = ref(null) // the bottom sheet <section>
 const legendOpen = ref(false) // legend panel showing (Legend button, top left)
+const legendShown = ref(true) // legend colours drawn on the map; the switch in the legend panel turns them off
 const directionBar = ref(null) // the turn-by-turn banner at the top while a route is showing
 
 const error = ref('') // shown on screen whenever it isn't empty
